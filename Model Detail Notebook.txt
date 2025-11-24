@@ -67,16 +67,7 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # COLLECTIONS
 # ==============================================================
 
-all_tables = []
-all_columns = []
-all_calculated_columns = []
-all_measures = []
-all_hierarchies = []
-all_levels = []
-all_partitions = []
-all_relationships = []
-all_calculation_groups = []
-all_calculation_items = []
+all_model_details = []
 
 # ==============================================================  
 # GET WORKSPACES
@@ -131,7 +122,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                             if hasattr(p, 'Mode'):
                                 storage_mode = p.Mode.ToString()
                             break  # Only get first partition
-                    all_tables.append({
+                    all_model_details.append({
                         "Type": "Table",
                         "Table": t.Name,
                         "Name": t.Name,
@@ -158,7 +149,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 calc_groups = list(tom.all_calculation_groups())
                 log(f"    Calculation Groups: {len(calc_groups)}")
                 for cg in calc_groups:
-                    all_calculation_groups.append({
+                    all_model_details.append({
                         "Type": "CalculationGroup",
                         "Table": cg.Name,
                         "Name": cg.Name,
@@ -185,7 +176,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 calc_items = list(tom.all_calculation_items())
                 log(f"    Calculation Items: {len(calc_items)}")
                 for ci in calc_items:
-                    all_calculation_items.append({
+                    all_model_details.append({
                         "Type": "CalculationItem",
                         "Table": ci.CalculationGroup.Name,
                         "Name": ci.Name,
@@ -212,7 +203,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 columns = list(tom.all_columns())
                 log(f"    Columns: {len(columns)}")
                 for col in columns:
-                    all_columns.append({
+                    all_model_details.append({
                         "Type": "Column",
                         "Table": col.Table.Name,
                         "Name": col.Name,
@@ -239,7 +230,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 calc_columns = list(tom.all_calculated_columns())
                 log(f"    Calculated Columns: {len(calc_columns)}")
                 for col in calc_columns:
-                    all_calculated_columns.append({
+                    all_model_details.append({
                         "Type": "CalculatedColumn",
                         "Table": col.Table.Name,
                         "Name": col.Name,
@@ -266,7 +257,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 measures = list(tom.all_measures())
                 log(f"    Measures: {len(measures)}")
                 for m in measures:
-                    all_measures.append({
+                    all_model_details.append({
                         "Type": "Measure",
                         "Table": m.Table.Name,
                         "Name": m.Name,
@@ -293,7 +284,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 hierarchies = list(tom.all_hierarchies())
                 log(f"    Hierarchies: {len(hierarchies)}")
                 for h in hierarchies:
-                    all_hierarchies.append({
+                    all_model_details.append({
                         "Type": "Hierarchy",
                         "Table": h.Table.Name,
                         "Name": h.Name,
@@ -320,7 +311,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 levels = list(tom.all_levels())
                 log(f"    Levels: {len(levels)}")
                 for l in levels:
-                    all_levels.append({
+                    all_model_details.append({
                         "Type": "Level",
                         "Table": l.Hierarchy.Table.Name,
                         "Name": l.Name,
@@ -352,7 +343,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                     if hasattr(p, 'Source') and p.Source:
                         if hasattr(p.Source, 'Expression'):
                             expression = p.Source.Expression if p.Source.Expression else ""
-                    all_partitions.append({
+                    all_model_details.append({
                         "Type": "Partition",
                         "Table": p.Table.Name,
                         "Name": p.Name,
@@ -379,7 +370,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                 relationships = tom.model.Relationships
                 log(f"    Relationships: {len(relationships)}")
                 for r in relationships:
-                    all_relationships.append({
+                    all_model_details.append({
                         "Type": "Relationship",
                         "Table": r.FromTable.Name,
                         "Name": r.FromColumn.Name,
@@ -434,16 +425,7 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-write_table(all_tables, "Tables")
-write_table(all_columns, "Columns")
-write_table(all_calculated_columns, "CalculatedColumns")
-write_table(all_measures, "Measures")
-write_table(all_hierarchies, "Hierarchies")
-write_table(all_levels, "Levels")
-write_table(all_partitions, "Partitions")
-write_table(all_relationships, "Relationships")
-write_table(all_calculation_groups, "CalculationGroups")
-write_table(all_calculation_items, "CalculationItems")
+write_table(all_model_details, "ModelDetail")
 
 # ==============================================================  
 # END
