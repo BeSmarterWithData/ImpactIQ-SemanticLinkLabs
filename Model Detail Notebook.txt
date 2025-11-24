@@ -109,9 +109,10 @@ for ws_row in workspaces_df.itertuples(index=False):
 
         log(f"  Datasets found: {len(datasets_df)}")
 
-        for idx, ds_row in enumerate(datasets_df.itertuples(index=False), start=1):
-            model_name = ds_row.Name
-            model_id = ds_row.Id
+        for idx, row in datasets_df.iterrows():
+            # Handle different possible column names
+            model_name = row.get('Dataset Name') or row.get('Name') or row.get('Display Name', '')
+            model_id = row.get('Dataset ID') or row.get('Id') or row.get('ID', '')
 
             t0 = time.time()
             log(f"\n  [{idx}/{len(datasets_df)}] Extracting model: {model_name}")
