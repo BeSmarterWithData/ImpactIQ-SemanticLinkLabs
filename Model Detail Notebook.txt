@@ -123,7 +123,9 @@ for ws_row in workspaces_df.itertuples(index=False):
                 tables = tom.model.Tables
                 log(f"    Tables: {len(tables)}")
                 for t in tables:
-                    storage_mode = t.Partitions[0].Mode.ToString() if t.Partitions.Count > 0 else ""
+                    storage_mode = ""
+                    if t.Partitions.Count > 0 and hasattr(t.Partitions[0], 'Mode'):
+                        storage_mode = t.Partitions[0].Mode.ToString()
                     all_tables.append({
                         "Type": "Table",
                         "Table": t.Name,
@@ -381,7 +383,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "Description": "",
                         "IsHidden": "",
                         "TableStorageMode": "",
-                        "Expression": r.Name if r.Name else "",
+                        "Expression": r.Name if r.Name else "",  # Matches C# script structure
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
