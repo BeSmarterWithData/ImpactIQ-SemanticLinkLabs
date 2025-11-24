@@ -1,5 +1,5 @@
 # ================================
-# FABRIC REPORT METADATA EXTRACTOR (ReportWrapper Only)
+# FABRIC MODEL METADATA EXTRACTOR (TOMWrapper)
 # WITH AUTO-SCHEMA CREATION
 # ================================
 
@@ -8,7 +8,7 @@
 import time, re, pandas as pd
 from datetime import datetime
 import sempy.fabric as fabric
-from sempy_labs.report import ReportWrapper
+from sempy_labs.tom import TOMWrapper
 
 # -----------------------------------
 # CONFIG
@@ -47,7 +47,7 @@ threading.Thread(target=heartbeat, daemon=True).start()
 # Start banner
 # -----------------------------------
 log("="*80)
-log("FABRIC REPORT METADATA EXTRACTION")
+log("FABRIC MODEL METADATA EXTRACTION")
 log(f"Started: {EXTRACTION_TIMESTAMP}")
 log("="*80)
 
@@ -67,15 +67,7 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # COLLECTIONS
 # ==============================================================
 
-all_pages = []
-all_visuals = []
-all_bookmarks = []
-all_custom_visuals = []
-all_report_filters = []
-all_page_filters = []
-all_visual_filters = []
-all_visual_objects = []
-all_report_level_measures = []
+all_model_details = []
 
 # ==============================================================  
 # GET WORKSPACES
@@ -93,7 +85,7 @@ log(f"Workspace count: {len(workspaces_df)}")
 log("")
 
 # ==============================================================  
-# REPORT METADATA EXTRACTION
+# MODEL METADATA EXTRACTION
 # ==============================================================
 
 for ws_row in workspaces_df.itertuples(index=False):
@@ -101,47 +93,310 @@ for ws_row in workspaces_df.itertuples(index=False):
     log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
 
     try:
-        reports_df = fabric.list_reports(workspace=ws_name)
-        if reports_df is None or reports_df.empty:
-            log("  No reports found.")
+        datasets_df = fabric.list_datasets(workspace=ws_name)
+        if datasets_df is None or datasets_df.empty:
+            log("  No datasets found.")
             continue
 
-        log(f"  Reports found: {len(reports_df)}")
+        log(f"  Datasets found: {len(datasets_df)}")
 
-        for idx, rpt_row in enumerate(reports_df.itertuples(index=False), start=1):
-            rpt_name = rpt_row.Name
-            rpt_id = rpt_row.Id
-            model_id = rpt_row._asdict().get("DatasetId", "")
+        for idx, row in datasets_df.iterrows():
+            # Handle different possible column names
+            model_name = row.get('Dataset Name') or row.get('Name') or row.get('Display Name', '')
+            model_id = row.get('Dataset ID') or row.get('Id') or row.get('ID', '')
 
             t0 = time.time()
-            log(f"\n  [{idx}/{len(reports_df)}] Extracting report: {rpt_name}")
+            log(f"\n  [{idx}/{len(datasets_df)}] Extracting model: {model_name}")
 
             try:
-                rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
+                tom = TOMWrapper(dataset=model_name, workspace=ws_name, readonly=True)
 
+                # -------------------- Tables --------------------
+                tables = tom.model.Tables
+                log(f"    Tables: {len(tables)}")
+                for t in tables:
+                    storage_mode = ""
+                    if t.Partitions.Count > 0:
+                        # Access first partition through iteration since .NET collections don't support Python indexing
+                        for p in t.Partitions:
+                            if hasattr(p, 'Mode'):
+                                storage_mode = p.Mode.ToString()
+                            break  # Only get first partition
+                    all_model_details.append({
+                        "Type": "Table",
+                        "Table": t.Name,
+                        "Name": t.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": "",
+                        "IsHidden": str(t.IsHidden),
+                        "TableStorageMode": storage_mode,
+                        "Expression": "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
 
-                # -------------------- Report-Level Measures --------------------
-                df = rpt.list_report_level_measures()
-                log(f"    Report-Level Measures: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_report_level_measures.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Measure", ""),
-                            "ObjectType": "Measure",
-                            "Expression": row.get("Expression", ""),
-                            "HiddenFlag": str(bool(row.get("Hidden", False))),
-                            "FormatString": row.get("Format String", ""),
-                            "ReportDate": REPORT_DATE
-                        })
+                # -------------------- Calculation Groups --------------------
+                calc_groups = list(tom.all_calculation_groups())
+                log(f"    Calculation Groups: {len(calc_groups)}")
+                for cg in calc_groups:
+                    all_model_details.append({
+                        "Type": "CalculationGroup",
+                        "Table": cg.Name,
+                        "Name": cg.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": cg.Description if cg.Description else "",
+                        "IsHidden": str(cg.IsHidden),
+                        "TableStorageMode": "",
+                        "Expression": "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Calculation Items --------------------
+                calc_items = list(tom.all_calculation_items())
+                log(f"    Calculation Items: {len(calc_items)}")
+                for ci in calc_items:
+                    all_model_details.append({
+                        "Type": "CalculationItem",
+                        "Table": ci.CalculationGroup.Name,
+                        "Name": ci.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": ci.Description if ci.Description else "",
+                        "IsHidden": "",
+                        "TableStorageMode": "",
+                        "Expression": ci.Expression if ci.Expression else "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Columns --------------------
+                columns = list(tom.all_columns())
+                log(f"    Columns: {len(columns)}")
+                for col in columns:
+                    all_model_details.append({
+                        "Type": "Column",
+                        "Table": col.Table.Name,
+                        "Name": col.Name,
+                        "FormatString": col.FormatString if col.FormatString else "",
+                        "DisplayFolder": col.DisplayFolder if col.DisplayFolder else "",
+                        "Description": col.Description if col.Description else "",
+                        "IsHidden": str(col.IsHidden),
+                        "TableStorageMode": "",
+                        "Expression": "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Calculated Columns --------------------
+                calc_columns = list(tom.all_calculated_columns())
+                log(f"    Calculated Columns: {len(calc_columns)}")
+                for col in calc_columns:
+                    all_model_details.append({
+                        "Type": "CalculatedColumn",
+                        "Table": col.Table.Name,
+                        "Name": col.Name,
+                        "FormatString": col.FormatString if col.FormatString else "",
+                        "DisplayFolder": col.DisplayFolder if col.DisplayFolder else "",
+                        "Description": col.Description if col.Description else "",
+                        "IsHidden": str(col.IsHidden),
+                        "TableStorageMode": "",
+                        "Expression": col.Expression if col.Expression else "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Measures --------------------
+                measures = list(tom.all_measures())
+                log(f"    Measures: {len(measures)}")
+                for m in measures:
+                    all_model_details.append({
+                        "Type": "Measure",
+                        "Table": m.Table.Name,
+                        "Name": m.Name,
+                        "FormatString": m.FormatString if m.FormatString else "",
+                        "DisplayFolder": m.DisplayFolder if m.DisplayFolder else "",
+                        "Description": m.Description if m.Description else "",
+                        "IsHidden": str(m.IsHidden),
+                        "TableStorageMode": "",
+                        "Expression": m.Expression if m.Expression else "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Hierarchies --------------------
+                hierarchies = list(tom.all_hierarchies())
+                log(f"    Hierarchies: {len(hierarchies)}")
+                for h in hierarchies:
+                    all_model_details.append({
+                        "Type": "Hierarchy",
+                        "Table": h.Table.Name,
+                        "Name": h.Name,
+                        "FormatString": "",
+                        "DisplayFolder": h.DisplayFolder if h.DisplayFolder else "",
+                        "Description": h.Description if h.Description else "",
+                        "IsHidden": str(h.IsHidden),
+                        "TableStorageMode": "",
+                        "Expression": "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Levels --------------------
+                levels = list(tom.all_levels())
+                log(f"    Levels: {len(levels)}")
+                for l in levels:
+                    all_model_details.append({
+                        "Type": "Level",
+                        "Table": l.Hierarchy.Table.Name,
+                        "Name": l.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": l.Description if l.Description else "",
+                        "IsHidden": "",
+                        "TableStorageMode": "",
+                        "Expression": "",
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Partitions --------------------
+                partitions = list(tom.all_partitions())
+                log(f"    Partitions: {len(partitions)}")
+                for p in partitions:
+                    storage_mode = p.Mode.ToString() if hasattr(p, 'Mode') else ""
+                    expression = ""
+                    if hasattr(p, 'Source') and p.Source:
+                        if hasattr(p.Source, 'Expression'):
+                            expression = p.Source.Expression if p.Source.Expression else ""
+                    all_model_details.append({
+                        "Type": "Partition",
+                        "Table": p.Table.Name,
+                        "Name": p.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": p.Description if p.Description else "",
+                        "IsHidden": "",
+                        "TableStorageMode": storage_mode,
+                        "Expression": expression,
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": "",
+                        "RelationshipFromColumn": "",
+                        "RelationshipToTable": "",
+                        "RelationshipToColumn": "",
+                        "RelationshipStatus": "",
+                        "RelationshipFromCardinality": "",
+                        "RelationshipToCardinality": "",
+                        "RelationshipCrossFilteringBehavior": ""
+                    })
+
+                # -------------------- Relationships --------------------
+                relationships = tom.model.Relationships
+                log(f"    Relationships: {len(relationships)}")
+                for r in relationships:
+                    all_model_details.append({
+                        "Type": "Relationship",
+                        "Table": r.FromTable.Name,
+                        "Name": r.FromColumn.Name,
+                        "FormatString": "",
+                        "DisplayFolder": "",
+                        "Description": "",
+                        "IsHidden": "",
+                        "TableStorageMode": "",
+                        "Expression": r.Name if r.Name else "",  # Matches C# script structure
+                        "ModelAsOfDate": REPORT_DATE,
+                        "ModelName": model_name,
+                        "ModelID": model_id,
+                        "RelationshipFromTable": r.FromTable.Name,
+                        "RelationshipFromColumn": r.FromColumn.Name,
+                        "RelationshipToTable": r.ToTable.Name,
+                        "RelationshipToColumn": r.ToColumn.Name,
+                        "RelationshipStatus": str(r.IsActive),
+                        "RelationshipFromCardinality": r.FromCardinality.ToString(),
+                        "RelationshipToCardinality": r.ToCardinality.ToString(),
+                        "RelationshipCrossFilteringBehavior": r.CrossFilteringBehavior.ToString()
+                    })
 
             except Exception as e:
-                log(f"    ERROR extracting {rpt_name}: {e}")
+                log(f"    ERROR extracting {model_name}: {e}")
 
-            log(f"  → Finished {rpt_name} in {time.time() - t0:.1f} sec "
+            log(f"  → Finished {model_name} in {time.time() - t0:.1f} sec "
                 f"(Total: {elapsed_min():.2f} min)")
 
     except Exception as e:
@@ -170,15 +425,7 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-write_table(all_pages, "Pages")
-write_table(all_visuals, "Visuals")
-write_table(all_bookmarks, "Bookmarks")
-write_table(all_custom_visuals, "CustomVisuals")
-write_table(all_report_filters, "ReportFilters")
-write_table(all_page_filters, "PageFilters")
-write_table(all_visual_filters, "VisualFilters")
-write_table(all_visual_objects, "VisualObjects")
-write_table(all_report_level_measures, "ReportLevelMeasures")
+write_table(all_model_details, "ModelDetail")
 
 # ==============================================================  
 # END
