@@ -13,8 +13,8 @@ from sempy_labs.report import ReportWrapper
 # -----------------------------------
 # CONFIG
 # -----------------------------------
-LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = "TestGov"   # <-- or set to None to scan all
+LAKEHOUSE_NAME = ""          # <-- CHANGE THIS
+SINGLE_WORKSPACE_NAME = ""   # <-- or set to None to scan all
 
 # Validate lakehouse name
 if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
