@@ -125,8 +125,12 @@ for ws_row in workspaces_df.itertuples(index=False):
                 log(f"    Tables: {len(tables)}")
                 for t in tables:
                     storage_mode = ""
-                    if t.Partitions.Count > 0 and hasattr(t.Partitions[0], 'Mode'):
-                        storage_mode = t.Partitions[0].Mode.ToString()
+                    if t.Partitions.Count > 0:
+                        # Access first partition through iteration since .NET collections don't support Python indexing
+                        for p in t.Partitions:
+                            if hasattr(p, 'Mode'):
+                                storage_mode = p.Mode.ToString()
+                            break  # Only get first partition
                     all_tables.append({
                         "Type": "Table",
                         "Table": t.Name,
