@@ -1,0 +1,193 @@
+# ================================
+# FABRIC REPORT METADATA EXTRACTOR (ReportWrapper Only)
+# WITH AUTO-SCHEMA CREATION
+# ================================
+
+%pip install semantic-link-labs --quiet
+
+import time, re, pandas as pd
+from datetime import datetime
+import sempy.fabric as fabric
+from sempy_labs.report import ReportWrapper
+
+# -----------------------------------
+# CONFIG
+# -----------------------------------
+LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
+SINGLE_WORKSPACE_NAME = "TestGov"   # <-- or set to None to scan all
+
+# Validate lakehouse name
+if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
+    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+
+EXTRACTION_TIMESTAMP = datetime.now()
+REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
+start_time = time.time()
+
+# -----------------------------------
+# Logging helpers
+# -----------------------------------
+def log(msg):
+    print(msg, flush=True)
+
+def elapsed_min():
+    return (time.time() - start_time) / 60
+
+# Heartbeat
+import threading
+heartbeat_running = True
+def heartbeat():
+    while heartbeat_running:
+        time.sleep(10)
+        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
+
+threading.Thread(target=heartbeat, daemon=True).start()
+
+# -----------------------------------
+# Start banner
+# -----------------------------------
+log("="*80)
+log("FABRIC REPORT METADATA EXTRACTION")
+log(f"Started: {EXTRACTION_TIMESTAMP}")
+log("="*80)
+
+# ============================================
+# AUTO-CREATE SCHEMA (LAKEHOUSE)
+# ============================================
+CATALOG = spark.sql("SELECT current_catalog()").first()[0]
+log(f"Using catalog: {CATALOG}")
+
+schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+log(f"Ensuring lakehouse schema exists: {schema_name}")
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+log(f"✓ Schema is ready: {schema_name}\n")
+
+# ==============================================================  
+# COLLECTIONS
+# ==============================================================
+
+all_pages = []
+all_visuals = []
+all_bookmarks = []
+all_custom_visuals = []
+all_report_filters = []
+all_page_filters = []
+all_visual_filters = []
+all_visual_objects = []
+all_report_level_measures = []
+
+# ==============================================================  
+# GET WORKSPACES
+# ==============================================================
+
+workspaces_df = fabric.list_workspaces()
+
+if SINGLE_WORKSPACE_NAME:
+    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+    if workspaces_df.empty:
+        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
+    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+
+log(f"Workspace count: {len(workspaces_df)}")
+log("")
+
+# ==============================================================  
+# REPORT METADATA EXTRACTION
+# ==============================================================
+
+for ws_row in workspaces_df.itertuples(index=False):
+    ws_name = ws_row.Name
+    log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
+
+    try:
+        reports_df = fabric.list_reports(workspace=ws_name)
+        if reports_df is None or reports_df.empty:
+            log("  No reports found.")
+            continue
+
+        log(f"  Reports found: {len(reports_df)}")
+
+        for idx, rpt_row in enumerate(reports_df.itertuples(index=False), start=1):
+            rpt_name = rpt_row.Name
+            rpt_id = rpt_row.Id
+            model_id = rpt_row._asdict().get("DatasetId", "")
+
+            t0 = time.time()
+            log(f"\n  [{idx}/{len(reports_df)}] Extracting report: {rpt_name}")
+
+            try:
+                rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
+
+
+                # -------------------- Report-Level Measures --------------------
+                df = rpt.list_report_level_measures()
+                log(f"    Report-Level Measures: {0 if df is None else len(df)}")
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    for _, row in df.iterrows():
+                        all_report_level_measures.append({
+                            "ReportName": rpt_name,
+                            "ReportID": rpt_id,
+                            "ModelID": model_id,
+                            "TableName": row.get("Table", ""),
+                            "ObjectName": row.get("Measure", ""),
+                            "ObjectType": "Measure",
+                            "Expression": row.get("Expression", ""),
+                            "HiddenFlag": str(bool(row.get("Hidden", False))),
+                            "FormatString": row.get("Format String", ""),
+                            "ReportDate": REPORT_DATE
+                        })
+
+            except Exception as e:
+                log(f"    ERROR extracting {rpt_name}: {e}")
+
+            log(f"  → Finished {rpt_name} in {time.time() - t0:.1f} sec "
+                f"(Total: {elapsed_min():.2f} min)")
+
+    except Exception as e:
+        log(f"ERROR accessing workspace {ws_name}: {e}")
+
+# ==============================================================  
+# WRITE TO LAKEHOUSE
+# ==============================================================
+
+log("\n" + "="*80)
+log("Writing output to Lakehouse")
+log("="*80)
+
+def write_table(data, name):
+    if not data:
+        log(f"⚠ Empty table skipped: {name}")
+        return
+
+    df = spark.createDataFrame(pd.DataFrame(data))
+    count = df.count()
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+
+    log(f"Writing {count} rows → {full_name}")
+
+    df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+
+    log(f"✓ Wrote table: {full_name}\n")
+
+write_table(all_pages, "Pages")
+write_table(all_visuals, "Visuals")
+write_table(all_bookmarks, "Bookmarks")
+write_table(all_custom_visuals, "CustomVisuals")
+write_table(all_report_filters, "ReportFilters")
+write_table(all_page_filters, "PageFilters")
+write_table(all_visual_filters, "VisualFilters")
+write_table(all_visual_objects, "VisualObjects")
+write_table(all_report_level_measures, "ReportLevelMeasures")
+
+# ==============================================================  
+# END
+# ==============================================================
+
+heartbeat_running = False
+
+log("\n" + "="*80)
+log("PROCESS COMPLETE")
+log(f"Finished at: {datetime.now()}")
+log(f"Total runtime: {elapsed_min():.2f} minutes")
+log("="*80)
