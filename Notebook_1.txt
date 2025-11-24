@@ -8,6 +8,15 @@ from sempy_labs.report import ReportWrapper
 import sempy.fabric as fabric
 
 
+#View Report Metadata
+
+report = 'Executive Scorecard' # Name or ID of the report
+
+# Name or ID of the workspace in which the report resides
+workspace = 'zGovernanceTesting' 
+
+rpt = ReportWrapper(report=report, workspace=workspace)
+
 # To view the report pages
 rpt.list_pages()
 
