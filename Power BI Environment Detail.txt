@@ -125,6 +125,12 @@ def safe_get(row, column, default=""):
     except Exception:
         return default
 
+def serialize_json(obj):
+    """Serialize object to JSON if non-empty, otherwise return empty string"""
+    if obj:
+        return json.dumps(obj)
+    return ""
+
 # ==============================================================  
 # GET WORKSPACES
 # ==============================================================
@@ -208,7 +214,7 @@ for ws_info in workspaces_info:
                                 "DatasetDatasourceType": datasource.get("datasourceType", ""),
                                 "DatasetDatasourceId": datasource.get("datasourceId", ""),
                                 "DatasetDatasourceGatewayId": datasource.get("gatewayId", ""),
-                                "DatasetDatasourceConnectionDetails": json.dumps(datasource.get("connectionDetails", {}))
+                                "DatasetDatasourceConnectionDetails": serialize_json(datasource.get("connectionDetails"))
                             })
                 except Exception as e:
                     log(f"    Could not fetch dataset sources for {dataset_name}: {e}")
@@ -288,7 +294,7 @@ for ws_info in workspaces_info:
                                 "DataflowDatasourceType": source.get("datasourceType", ""),
                                 "DataflowDatasourceId": source.get("datasourceId", ""),
                                 "DataflowDatasourceGatewayId": source.get("gatewayId", ""),
-                                "DataflowDatasourceConnectionDetails": json.dumps(source.get("connectionDetails", {}))
+                                "DataflowDatasourceConnectionDetails": serialize_json(source.get("connectionDetails"))
                             })
                 except Exception as e:
                     log(f"    Could not fetch dataflow sources for {dataflow_name}: {e}")
@@ -312,7 +318,7 @@ for ws_info in workspaces_info:
                                 "DataflowRefreshEndTime": refresh.get("endTime", ""),
                                 "DataflowRefreshStatus": refresh.get("status", ""),
                                 "DataflowRefreshType": refresh.get("refreshType", ""),
-                                "DataflowErrorInfo": json.dumps(refresh.get("errorInfo", {}))
+                                "DataflowErrorInfo": serialize_json(refresh.get("errorInfo"))
                             })
                 except Exception as e:
                     log(f"    Could not fetch refresh history for {dataflow_name}: {e}")
@@ -420,7 +426,7 @@ try:
         apps = response.json().get('value', [])
         log(f"Apps found: {len(apps)}")
         
-        # Filter to only apps in our workspaces
+        # Filter to only apps in our workspaces (create list once)
         workspace_ids = [ws['WorkspaceId'] for ws in workspaces_info]
         
         for app in apps:
@@ -518,8 +524,9 @@ def write_table(data, name):
         log(f"⚠ Empty table skipped: {name}")
         return
 
-    # Create Spark DataFrame directly from data
-    df = spark.createDataFrame(data)
+    # Convert to pandas DataFrame first for proper type handling, then to Spark
+    pandas_df = pd.DataFrame(data)
+    df = spark.createDataFrame(pandas_df)
     count = df.count()
     full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
 
