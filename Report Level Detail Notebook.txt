@@ -9,11 +9,13 @@ import time, re, pandas as pd
 from datetime import datetime
 import sempy.fabric as fabric
 from sempy_labs.report import ReportWrapper
+# Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
+from sempy_labs._helper_functions import resolve_dataset_from_report
 
 # -----------------------------------
 # CONFIG
 # -----------------------------------
-LAKEHOUSE_NAME = ""          # <-- CHANGE THIS
+LAKEHOUSE_NAME = "dbo"         # <-- CHANGE THIS
 SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
@@ -64,18 +66,22 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
 log(f"✓ Schema is ready: {schema_name}\n")
 
 # ==============================================================  
-# COLLECTIONS
+# COLLECTIONS & SCHEMA TEMPLATES
 # ==============================================================
+# Each collection includes a template row that defines the schema.
+# This ensures empty tables can be created with correct column structure.
 
-all_pages = []
-all_visuals = []
-all_bookmarks = []
-all_custom_visuals = []
-all_report_filters = []
-all_page_filters = []
-all_visual_filters = []
-all_visual_objects = []
-all_report_level_measures = []
+all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": ""}]
+all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "ReportDate": ""}]
+all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "ParentGroup": "", "ReportDate": ""}]
+all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "ReportDate": ""}]
+all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": ""}]
+all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": ""}]
+all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": ""}]
+all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "ReportDate": ""}]
+all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ReportDate": ""}]
+all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "ReportDate": ""}]
+all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "TypeID": "", "Type": "", "ReportDate": ""}]
 
 # ==============================================================  
 # GET WORKSPACES
@@ -111,7 +117,33 @@ for ws_row in workspaces_df.itertuples(index=False):
         for idx, rpt_row in enumerate(reports_df.itertuples(index=False), start=1):
             rpt_name = rpt_row.Name
             rpt_id = rpt_row.Id
-            model_id = rpt_row._asdict().get("DatasetId", "")
+            
+            # Get dataset/model ID - try from list_reports first, then use API as fallback
+            model_id = ""
+            if hasattr(rpt_row, 'DatasetId') and rpt_row.DatasetId is not None:
+                model_id = str(rpt_row.DatasetId)
+            
+            if not model_id:
+                try:
+                    # resolve_dataset_from_report returns: (dataset_id, dataset_name, workspace_id, workspace_name)
+                    dataset_id, _, _, _ = resolve_dataset_from_report(
+                        report=rpt_id, workspace=ws_name
+                    )
+                    model_id = str(dataset_id) if dataset_id is not None else ""
+                except Exception as e:
+                    log(f"    Warning: Could not resolve dataset ID: {e}")
+                    model_id = ""
+
+            # -------------------- Connections --------------------
+            # Add connection record (one per report)
+            all_connections.append({
+                "ReportID": rpt_id,
+                "ModelID": model_id,
+                "ReportDate": REPORT_DATE,
+                "ReportName": rpt_name,
+                "Type": "",
+                "ServerName": ""
+            })
 
             t0 = time.time()
             log(f"\n  [{idx}/{len(reports_df)}] Extracting report: {rpt_name}")
@@ -128,9 +160,9 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "Id": row.get("Page ID", ""),
-                            "Name": row.get("Page Name", ""),
-                            "Number": row.get("Page Number", 0),
+                            "Id": row.get("Page Name", ""),
+                            "Name": row.get("Page Display Name", ""),
+                            "Number": 0,  # Note: Page number not available in list_pages() output
                             "Width": row.get("Width", 0),
                             "Height": row.get("Height", 0),
                             "HiddenFlag": bool(row.get("Hidden", False)),
@@ -148,11 +180,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "PageName": row.get("Page Name", ""),
-                            "PageId": row.get("Page ID", ""),
-                            "Id": row.get("Visual ID", ""),
+                            "PageName": row.get("Page Display Name", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "Id": row.get("Visual Name", ""),
                             "Name": row.get("Visual Name", ""),
-                            "Type": row.get("Visual Type", ""),
+                            "Type": row.get("Type", ""),
                             "CustomVisualFlag": bool(row.get("Custom Visual", False)),
                             "HiddenFlag": bool(row.get("Hidden", False)),
                             "X": row.get("X", 0),
@@ -160,8 +192,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "Z": row.get("Z", 0),
                             "Width": row.get("Width", 0),
                             "Height": row.get("Height", 0),
-                            "ObjectCount": row.get("Object Count", 0),
-                            "ParentGroup": row.get("Parent Group", ""),
+                            "ObjectCount": row.get("Visual Object Count", 0),
+                            "ParentGroup": "",  # Note: Parent group not available in list_visuals() output
                             "ReportDate": REPORT_DATE
                         })
 
@@ -174,11 +206,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "Name": row.get("Bookmark Name", ""),
-                            "Id": row.get("Bookmark ID", ""),
-                            "PageName": row.get("Page Name", ""),
-                            "PageId": row.get("Page ID", ""),
-                            "VisualId": row.get("Visual ID", ""),
+                            "Name": row.get("Bookmark Display Name", ""),
+                            "Id": row.get("Bookmark Name", ""),
+                            "PageName": row.get("Page Display Name", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "VisualId": row.get("Visual Name", ""),
                             "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
                             "ReportDate": REPORT_DATE
                         })
@@ -192,7 +224,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "Name": row.get("Name", ""),
+                            "Name": row.get("Custom Visual Display Name", ""),
                             "ReportDate": REPORT_DATE
                         })
 
@@ -205,11 +237,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "displayName": row.get("Display Name", ""),
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Column", "") or row.get("Measure", ""),
-                            "ObjectType": row.get("Type", ""),
-                            "FilterType": row.get("Filter Type", ""),
+                            "displayName": row.get("Filter Name", ""),
+                            "TableName": row.get("Table Name", ""),
+                            "ObjectName": row.get("Object Name", ""),
+                            "ObjectType": row.get("Object Type", ""),
+                            "FilterType": row.get("Type", ""),
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
                             "ReportDate": REPORT_DATE
@@ -224,13 +256,13 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "PageId": row.get("Page ID", ""),
-                            "PageName": row.get("Page Name", ""),
-                            "displayName": row.get("Display Name", ""),
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Column", "") or row.get("Measure", ""),
-                            "ObjectType": row.get("Type", ""),
-                            "FilterType": row.get("Filter Type", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "PageName": row.get("Page Display Name", ""),
+                            "displayName": row.get("Filter Name", ""),
+                            "TableName": row.get("Table Name", ""),
+                            "ObjectName": row.get("Object Name", ""),
+                            "ObjectType": row.get("Object Type", ""),
+                            "FilterType": row.get("Type", ""),
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
                             "ReportDate": REPORT_DATE
@@ -245,16 +277,16 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "PageName": row.get("Page Name", ""),
-                            "PageId": row.get("Page ID", ""),
-                            "VisualId": row.get("Visual ID", ""),
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Column", "") or row.get("Measure", ""),
-                            "ObjectType": row.get("Type", ""),
-                            "FilterType": row.get("Filter Type", ""),
+                            "PageName": row.get("Page Display Name", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "VisualId": row.get("Visual Name", ""),
+                            "TableName": row.get("Table Name", ""),
+                            "ObjectName": row.get("Object Name", ""),
+                            "ObjectType": row.get("Object Type", ""),
+                            "FilterType": row.get("Type", ""),
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
-                            "displayName": row.get("Display Name", ""),
+                            "displayName": row.get("Filter Name", ""),
                             "ReportDate": REPORT_DATE
                         })
 
@@ -267,16 +299,16 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "PageName": row.get("Page Name", ""),
-                            "PageId": row.get("Page ID", ""),
-                            "VisualId": row.get("Visual ID", ""),
-                            "VisualType": row.get("Visual Type", ""),
-                            "CustomVisualFlag": bool(row.get("Custom Visual", False)),
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Column", "") or row.get("Measure", ""),
-                            "ObjectType": row.get("Type", ""),
-                            "Source": row.get("Source", ""),
-                            "displayName": row.get("Display Name", ""),
+                            "PageName": row.get("Page Display Name", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "VisualId": row.get("Visual Name", ""),
+                            "VisualType": "",  # Note: Visual type not available in list_visual_objects() - join with Visuals table if needed
+                            "CustomVisualFlag": False,  # Note: Custom visual flag not available in list_visual_objects() - join with Visuals table if needed
+                            "TableName": row.get("Table Name", ""),
+                            "ObjectName": row.get("Object Name", ""),
+                            "ObjectType": row.get("Object Type", ""),
+                            "Source": "",  # Note: Source not available in list_visual_objects() output
+                            "displayName": row.get("Object Display Name", ""),
                             "ReportDate": REPORT_DATE
                         })
 
@@ -289,12 +321,30 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportName": rpt_name,
                             "ReportID": rpt_id,
                             "ModelID": model_id,
-                            "TableName": row.get("Table", ""),
-                            "ObjectName": row.get("Measure", ""),
+                            "TableName": row.get("Table Name", ""),
+                            "ObjectName": row.get("Measure Name", ""),
                             "ObjectType": "Measure",
                             "Expression": row.get("Expression", ""),
-                            "HiddenFlag": str(bool(row.get("Hidden", False))),
+                            "HiddenFlag": "False",  # Note: Hidden flag not available in list_report_level_measures() - report-level measures are typically visible
                             "FormatString": row.get("Format String", ""),
+                            "ReportDate": REPORT_DATE
+                        })
+
+                # -------------------- Visual Interactions --------------------
+                df = rpt.list_visual_interactions()
+                log(f"    Visual Interactions: {0 if df is None else len(df)}")
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    for _, row in df.iterrows():
+                        all_visual_interactions.append({
+                            "ReportName": rpt_name,
+                            "ReportID": rpt_id,
+                            "ModelID": model_id,
+                            "PageName": row.get("Page Display Name", ""),
+                            "PageId": row.get("Page Name", ""),
+                            "SourceVisualID": row.get("Source Visual Name", ""),
+                            "TargetVisualID": row.get("Target Visual Name", ""),
+                            "TypeID": "",  # Note: TypeID not available from semantic-link-labs
+                            "Type": row.get("Type", ""),
                             "ReportDate": REPORT_DATE
                         })
 
@@ -316,20 +366,39 @@ log("Writing output to Lakehouse")
 log("="*80)
 
 def write_table(data, name):
-    if not data:
-        log(f"⚠ Empty table skipped: {name}")
+    """
+    Write data to a Delta table. Schema is inferred from the first row (template).
+    Creates empty table with schema if only template row exists.
+    
+    Args:
+        data: List of dictionaries containing the data (first row is schema template)
+        name: Name of the table
+    """
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    
+    # Check if we only have the template row (length 1 means just the schema template)
+    if len(data) == 1:
+        log(f"⚠ No data for {name}, creating empty table with schema")
+        # Use template to create empty DataFrame with correct schema
+        df = spark.createDataFrame(pd.DataFrame(data))
+        # Filter out the template row to create truly empty table
+        empty_df = df.filter("1=0")
+        empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+        log(f"✓ Created empty table: {full_name}\n")
         return
 
-    df = spark.createDataFrame(pd.DataFrame(data))
-    count = df.count()
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    # Skip the template row (first row) and create DataFrame with actual data
+    pandas_df = pd.DataFrame(data)
+    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
+    count = actual_df.count()
 
     log(f"Writing {count} rows → {full_name}")
 
-    df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+    actual_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
 
     log(f"✓ Wrote table: {full_name}\n")
 
+write_table(all_connections, "Connections")
 write_table(all_pages, "Pages")
 write_table(all_visuals, "Visuals")
 write_table(all_bookmarks, "Bookmarks")
@@ -339,6 +408,7 @@ write_table(all_page_filters, "PageFilters")
 write_table(all_visual_filters, "VisualFilters")
 write_table(all_visual_objects, "VisualObjects")
 write_table(all_report_level_measures, "ReportLevelMeasures")
+write_table(all_visual_interactions, "VisualInteractions")
 
 # ==============================================================  
 # END
