@@ -111,51 +111,8 @@ dataset_name_lookup = {}
 dataflow_name_lookup = {}
 
 # ==============================================================  
-# COLUMN RENAME MAPPINGS (from PowerShell script)
-# ==============================================================
-
-workspace_rename_map = {
-    "Id": "WorkspaceId",
-    "Name": "WorkspaceName",
-    "Type": "WorkspaceType",
-    "Capacity Id": "WorkspaceCapacityId"
-}
-
-dataset_rename_map = {
-    "Dataset ID": "DatasetId",
-    "Dataset Name": "DatasetName",
-    "Description": "DatasetDescription",
-    "Web URL": "DatasetWebUrl",
-    "Configured By": "DatasetConfiguredBy",
-    "Is Refreshable": "DatasetIsRefreshable",
-    "Target Storage Mode": "DatasetTargetStorageMode",
-    "Created Date": "DatasetCreatedDate"
-}
-
-report_rename_map = {
-    "Id": "ReportId",
-    "Name": "ReportName",
-    "Description": "ReportDescription",
-    "Web URL": "ReportWebUrl",
-    "Embed URL": "ReportEmbedUrl",
-    "Report Type": "ReportType",
-    "Dataset Id": "DatasetId"
-}
-
-# ==============================================================  
 # HELPER FUNCTIONS
 # ==============================================================
-
-def rename_columns(df, rename_map):
-    """Rename DataFrame columns based on mapping"""
-    if df is None or df.empty:
-        return df
-    
-    for old_name, new_name in rename_map.items():
-        if old_name in df.columns:
-            df = df.rename(columns={old_name: new_name})
-    
-    return df
 
 def safe_get(row, column, default=""):
     """Safely get value from row"""
@@ -195,6 +152,9 @@ log(f"✓ Workspaces collected: {len(workspaces_info)}\n")
 # EXTRACT ENVIRONMENT METADATA
 # ==============================================================
 
+# Create a single REST client instance to reuse
+client = FabricRestClient()
+
 for ws_info in workspaces_info:
     ws_name = ws_info["WorkspaceName"]
     ws_id = ws_info["WorkspaceId"]
@@ -231,7 +191,6 @@ for ws_info in workspaces_info:
                 
                 # Fetch dataset sources using REST API
                 try:
-                    client = FabricRestClient()
                     datasources_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/datasources"
                     response = client.get(datasources_url)
                     
@@ -253,7 +212,6 @@ for ws_info in workspaces_info:
                 
                 # Fetch dataset refresh history
                 try:
-                    client = FabricRestClient()
                     refresh_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshes"
                     response = client.get(refresh_url)
                     
@@ -283,7 +241,6 @@ for ws_info in workspaces_info:
     # -------------------- DATAFLOWS --------------------
     try:
         log(f"  Fetching dataflows...")
-        client = FabricRestClient()
         dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
         response = client.get(dataflows_url)
         
@@ -364,7 +321,6 @@ for ws_info in workspaces_info:
     # -------------------- FABRIC ITEMS --------------------
     try:
         log(f"  Fetching Fabric items...")
-        client = FabricRestClient()
         items_url = f"v1/workspaces/{ws_id}/items"
         response = client.get(items_url)
         
@@ -420,7 +376,6 @@ for ws_info in workspaces_info:
                 
                 # Fetch report pages using REST API
                 try:
-                    client = FabricRestClient()
                     pages_url = f"v1.0/myorg/groups/{ws_id}/reports/{report_id}/pages"
                     pages_response = client.get(pages_url)
                     
@@ -455,7 +410,6 @@ log("Fetching Apps and App Reports")
 log("="*80)
 
 try:
-    client = FabricRestClient()
     apps_url = "v1.0/myorg/apps"
     response = client.get(apps_url)
     
@@ -525,7 +479,6 @@ for ws_info in workspaces_info:
     ws_id = ws_info["WorkspaceId"]
     
     try:
-        client = FabricRestClient()
         lineage_url = f"v1.0/myorg/groups/{ws_id}/dataflows/upstreamDataflows"
         response = client.get(lineage_url)
         
