@@ -1,6 +1,28 @@
 # ================================
 # POWER BI ENVIRONMENT DETAIL EXTRACTOR
-# Mimics the PowerShell script environment detail extraction
+# ================================
+# 
+# This notebook extracts comprehensive Power BI environment metadata
+# using the Fabric sempy library and REST APIs, mimicking the PowerShell
+# script from:
+# https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution
+#
+# EXTRACTED DATA (written to lakehouse tables):
+# 1. Workspaces - workspace metadata with renamed columns
+# 2. FabricItems - Fabric items (excluding Reports and SemanticModels)
+# 3. Datasets - dataset metadata with renamed columns
+# 4. DatasetSourcesInfo - dataset data sources
+# 5. DatasetRefreshHistory - dataset refresh history
+# 6. Dataflows - dataflow metadata with renamed columns
+# 7. DataflowLineage - dataflow lineage (upstream dataflows)
+# 8. DataflowSourcesInfo - dataflow data sources
+# 9. DataflowRefreshHistory - dataflow refresh history
+# 10. Reports - report metadata with renamed columns
+# 11. ReportPages - report pages with renamed columns
+# 12. Apps - Power BI apps
+# 13. AppReports - reports within apps
+#
+# All column names are renamed to match the PowerShell script output.
 # ================================
 
 %pip install semantic-link-labs --quiet
@@ -8,6 +30,7 @@
 import time, re, pandas as pd, json
 from datetime import datetime
 import sempy.fabric as fabric
+from sempy.fabric import FabricRestClient
 
 # -----------------------------------
 # CONFIG
@@ -16,6 +39,9 @@ LAKEHOUSE_NAME = ""          # <-- CHANGE THIS
 SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
+if not LAKEHOUSE_NAME:
+    raise ValueError("LAKEHOUSE_NAME must be set!")
+    
 if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
     raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
 
@@ -205,9 +231,6 @@ for ws_info in workspaces_info:
                 
                 # Fetch dataset sources using REST API
                 try:
-                    from sempy_labs import lakehouse as lh
-                    from sempy.fabric import FabricRestClient
-                    
                     client = FabricRestClient()
                     datasources_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/datasources"
                     response = client.get(datasources_url)
@@ -395,20 +418,23 @@ for ws_info in workspaces_info:
                     "DatasetName": dataset_name
                 })
                 
-                # Fetch report pages
+                # Fetch report pages using REST API
                 try:
-                    pages_df = fabric.list_report_pages(report=report_name, workspace=ws_name)
+                    client = FabricRestClient()
+                    pages_url = f"v1.0/myorg/groups/{ws_id}/reports/{report_id}/pages"
+                    pages_response = client.get(pages_url)
                     
-                    if pages_df is not None and not pages_df.empty:
-                        for _, page_row in pages_df.iterrows():
+                    if pages_response.status_code == 200:
+                        pages = pages_response.json().get('value', [])
+                        for page in pages:
                             report_pages_info.append({
                                 "WorkspaceId": ws_id,
                                 "WorkspaceName": ws_name,
                                 "ReportId": report_id,
                                 "ReportName": report_name,
-                                "PageName": safe_get(page_row, "Page Name"),
-                                "PageDisplayName": safe_get(page_row, "Page Display Name"),
-                                "PageOrder": safe_get(page_row, "Page Order", 0)
+                                "PageName": page.get("name", ""),
+                                "PageDisplayName": page.get("displayName", ""),
+                                "PageOrder": page.get("order", 0)
                             })
                 except Exception as e:
                     log(f"    ERROR fetching pages for {report_name}: {e}")
