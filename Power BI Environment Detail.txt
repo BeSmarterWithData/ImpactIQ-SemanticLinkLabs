@@ -27,7 +27,10 @@
 
 %pip install semantic-link-labs --quiet
 
-import time, re, pandas as pd, json
+import time
+import re
+import pandas as pd
+import json
 from datetime import datetime
 import sempy.fabric as fabric
 from sempy.fabric import FabricRestClient
@@ -40,10 +43,10 @@ SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
 if not LAKEHOUSE_NAME:
-    raise ValueError("LAKEHOUSE_NAME must be set!")
+    raise ValueError("LAKEHOUSE_NAME must be set! Please provide a valid lakehouse name (alphanumeric and underscores only).")
     
 if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+    raise ValueError(f"Invalid lakehouse name: '{LAKEHOUSE_NAME}'. Must contain only alphanumeric characters and underscores.")
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -119,7 +122,7 @@ def safe_get(row, column, default=""):
     try:
         val = row.get(column, default)
         return val if val is not None else default
-    except:
+    except Exception:
         return default
 
 # ==============================================================  
@@ -321,7 +324,7 @@ for ws_info in workspaces_info:
     # -------------------- FABRIC ITEMS --------------------
     try:
         log(f"  Fetching Fabric items...")
-        items_url = f"v1/workspaces/{ws_id}/items"
+        items_url = f"v1.0/workspaces/{ws_id}/items"
         response = client.get(items_url)
         
         if response.status_code == 200:
@@ -515,7 +518,8 @@ def write_table(data, name):
         log(f"⚠ Empty table skipped: {name}")
         return
 
-    df = spark.createDataFrame(pd.DataFrame(data))
+    # Create Spark DataFrame directly from data
+    df = spark.createDataFrame(data)
     count = df.count()
     full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
 
