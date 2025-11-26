@@ -114,6 +114,26 @@ dataset_name_lookup = {}
 dataflow_name_lookup = {}
 
 # ==============================================================  
+# SAMPLE ROWS FOR EMPTY TABLE CREATION
+# ==============================================================
+
+SAMPLE_ROWS = {
+    "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
+    "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
+    "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": False, "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
+    "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
+    "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
+    "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
+    "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
+    "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
+    "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
+    "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
+    "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
+    "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": ""},
+    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": False, "AppReportDatasetId": "", "ReportId": ""}
+}
+
+# ==============================================================  
 # HELPER FUNCTIONS
 # ==============================================================
 
@@ -519,16 +539,27 @@ log("\n" + "="*80)
 log("Writing output to Lakehouse")
 log("="*80)
 
-def write_table(data, name):
+def write_table(data, name, sample_row=None):
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    
     if not data:
-        log(f"⚠ Empty table skipped: {name}")
+        # Create empty table using sample row structure if provided
+        if sample_row:
+            log(f"Creating empty table with schema: {name}")
+            pandas_df = pd.DataFrame([sample_row])
+            df = spark.createDataFrame(pandas_df)
+            # Filter to create empty dataframe with schema
+            empty_df = df.filter("1=0")
+            empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+            log(f"✓ Created empty table: {full_name}\n")
+        else:
+            log(f"⚠ Empty table skipped (no schema): {name}\n")
         return
 
     # Convert to pandas DataFrame first for proper type handling, then to Spark
     pandas_df = pd.DataFrame(data)
     df = spark.createDataFrame(pandas_df)
     count = df.count()
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
 
     log(f"Writing {count} rows → {full_name}")
 
@@ -537,19 +568,19 @@ def write_table(data, name):
     log(f"✓ Wrote table: {full_name}\n")
 
 # Write all tables matching PowerShell script worksheets
-write_table(workspaces_info, "Workspaces")
-write_table(fabric_items_info, "FabricItems")
-write_table(datasets_info, "Datasets")
-write_table(dataset_sources_info, "DatasetSourcesInfo")
-write_table(dataset_refresh_history, "DatasetRefreshHistory")
-write_table(dataflows_info, "Dataflows")
-write_table(dataflow_lineage, "DataflowLineage")
-write_table(dataflow_sources_info, "DataflowSourcesInfo")
-write_table(dataflow_refresh_history, "DataflowRefreshHistory")
-write_table(reports_info, "Reports")
-write_table(report_pages_info, "ReportPages")
-write_table(apps_info, "Apps")
-write_table(reports_in_app_info, "AppReports")
+write_table(workspaces_info, "Workspaces", SAMPLE_ROWS.get("Workspaces"))
+write_table(fabric_items_info, "FabricItems", SAMPLE_ROWS.get("FabricItems"))
+write_table(datasets_info, "Datasets", SAMPLE_ROWS.get("Datasets"))
+write_table(dataset_sources_info, "DatasetSourcesInfo", SAMPLE_ROWS.get("DatasetSourcesInfo"))
+write_table(dataset_refresh_history, "DatasetRefreshHistory", SAMPLE_ROWS.get("DatasetRefreshHistory"))
+write_table(dataflows_info, "Dataflows", SAMPLE_ROWS.get("Dataflows"))
+write_table(dataflow_lineage, "DataflowLineage", SAMPLE_ROWS.get("DataflowLineage"))
+write_table(dataflow_sources_info, "DataflowSourcesInfo", SAMPLE_ROWS.get("DataflowSourcesInfo"))
+write_table(dataflow_refresh_history, "DataflowRefreshHistory", SAMPLE_ROWS.get("DataflowRefreshHistory"))
+write_table(reports_info, "Reports", SAMPLE_ROWS.get("Reports"))
+write_table(report_pages_info, "ReportPages", SAMPLE_ROWS.get("ReportPages"))
+write_table(apps_info, "Apps", SAMPLE_ROWS.get("Apps"))
+write_table(reports_in_app_info, "AppReports", SAMPLE_ROWS.get("AppReports"))
 
 # ==============================================================  
 # END
