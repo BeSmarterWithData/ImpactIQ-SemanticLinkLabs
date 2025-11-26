@@ -64,10 +64,33 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
 log(f"✓ Schema is ready: {schema_name}\n")
 
 # ==============================================================  
-# COLLECTIONS
+# COLLECTIONS & SCHEMA TEMPLATES
 # ==============================================================
+# Each collection includes a template row that defines the schema.
+# This ensures empty tables can be created with correct column structure.
 
-all_model_details = []
+all_model_details = [{
+    "Type": "",
+    "Table": "",
+    "Name": "",
+    "FormatString": "",
+    "DisplayFolder": "",
+    "Description": "",
+    "IsHidden": "",
+    "TableStorageMode": "",
+    "Expression": "",
+    "ModelAsOfDate": "",
+    "ModelName": "",
+    "ModelID": "",
+    "RelationshipFromTable": "",
+    "RelationshipFromColumn": "",
+    "RelationshipToTable": "",
+    "RelationshipToColumn": "",
+    "RelationshipStatus": "",
+    "RelationshipFromCardinality": "",
+    "RelationshipToCardinality": "",
+    "RelationshipCrossFilteringBehavior": ""
+}]
 
 # ==============================================================  
 # GET WORKSPACES
@@ -411,17 +434,35 @@ log("Writing output to Lakehouse")
 log("="*80)
 
 def write_table(data, name):
-    if not data:
-        log(f"⚠ Empty table skipped: {name}")
+    """
+    Write data to a Delta table. Schema is inferred from the first row (template).
+    Creates empty table with schema if only template row exists.
+    
+    Args:
+        data: List of dictionaries containing the data (first row is schema template)
+        name: Name of the table
+    """
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    
+    # Check if we only have the template row (length 1 means just the schema template)
+    if len(data) == 1:
+        log(f"⚠ No data for {name}, creating empty table with schema")
+        # Use template to create empty DataFrame with correct schema
+        df = spark.createDataFrame(pd.DataFrame(data))
+        # Filter out the template row to create truly empty table
+        empty_df = df.filter("1=0")
+        empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+        log(f"✓ Created empty table: {full_name}\n")
         return
 
-    df = spark.createDataFrame(pd.DataFrame(data))
-    count = df.count()
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    # Skip the template row (first row) and create DataFrame with actual data
+    pandas_df = pd.DataFrame(data)
+    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
+    count = actual_df.count()
 
     log(f"Writing {count} rows → {full_name}")
 
-    df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+    actual_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
 
     log(f"✓ Wrote table: {full_name}\n")
 
