@@ -1,14 +1,39 @@
 # ================================
-# FABRIC REPORT METADATA EXTRACTOR (ReportWrapper Only)
-# WITH AUTO-SCHEMA CREATION
+# POWER BI ENVIRONMENT DETAIL EXTRACTOR
+# ================================
+# 
+# This notebook extracts comprehensive Power BI environment metadata
+# using the Fabric sempy library and REST APIs, mimicking the PowerShell
+# script from:
+# https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution
+#
+# EXTRACTED DATA (written to lakehouse tables):
+# 1. Workspaces - workspace metadata with renamed columns
+# 2. FabricItems - Fabric items (excluding Reports and SemanticModels)
+# 3. Datasets - dataset metadata with renamed columns
+# 4. DatasetSourcesInfo - dataset data sources
+# 5. DatasetRefreshHistory - dataset refresh history
+# 6. Dataflows - dataflow metadata with renamed columns
+# 7. DataflowLineage - dataflow lineage (upstream dataflows)
+# 8. DataflowSourcesInfo - dataflow data sources
+# 9. DataflowRefreshHistory - dataflow refresh history
+# 10. Reports - report metadata with renamed columns
+# 11. ReportPages - report pages with renamed columns
+# 12. Apps - Power BI apps
+# 13. AppReports - reports within apps
+#
+# All column names are renamed to match the PowerShell script output.
 # ================================
 
 %pip install semantic-link-labs --quiet
 
-import time, re, pandas as pd
+import time
+import re
+import pandas as pd
+import json
 from datetime import datetime
 import sempy.fabric as fabric
-from sempy_labs.report import ReportWrapper
+from sempy.fabric import FabricRestClient
 
 # -----------------------------------
 # CONFIG
@@ -17,8 +42,11 @@ LAKEHOUSE_NAME = ""          # <-- CHANGE THIS
 SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
+if not LAKEHOUSE_NAME:
+    raise ValueError("LAKEHOUSE_NAME must be set! Please provide a valid lakehouse name (alphanumeric and underscores only).")
+    
 if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+    raise ValueError(f"Invalid lakehouse name: '{LAKEHOUSE_NAME}'. Must contain only alphanumeric characters and underscores.")
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -47,7 +75,7 @@ threading.Thread(target=heartbeat, daemon=True).start()
 # Start banner
 # -----------------------------------
 log("="*80)
-log("FABRIC REPORT METADATA EXTRACTION")
+log("POWER BI ENVIRONMENT DETAIL EXTRACTION")
 log(f"Started: {EXTRACTION_TIMESTAMP}")
 log("="*80)
 
@@ -64,15 +92,70 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
 log(f"✓ Schema is ready: {schema_name}\n")
 
 # ==============================================================  
-# COLLECTIONS
+# COLLECTIONS - Matching PowerShell script structure
 # ==============================================================
 
-all_pages = []
+workspaces_info = []
+fabric_items_info = []
+datasets_info = []
+dataset_sources_info = []
+dataset_refresh_history = []
+dataflows_info = []
+dataflow_lineage = []
+dataflow_sources_info = []
+dataflow_refresh_history = []
+reports_info = []
+report_pages_info = []
+apps_info = []
+reports_in_app_info = []
+
+# Lookup tables
+dataset_name_lookup = {}
+dataflow_name_lookup = {}
+
+# ==============================================================  
+# SAMPLE ROWS FOR EMPTY TABLE CREATION
+# ==============================================================
+
+SAMPLE_ROWS = {
+    "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
+    "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
+    "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": False, "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
+    "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
+    "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
+    "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
+    "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
+    "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
+    "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
+    "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
+    "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
+    "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": ""},
+    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": False, "AppReportDatasetId": "", "ReportId": ""}
+}
+
+# ==============================================================  
+# HELPER FUNCTIONS
+# ==============================================================
+
+def safe_get(row, column, default=""):
+    """Safely get value from row"""
+    try:
+        val = row.get(column, default)
+        return val if val is not None else default
+    except Exception:
+        return default
+
+def serialize_json(obj):
+    """Serialize object to JSON if non-empty, otherwise return empty string"""
+    if obj:
+        return json.dumps(obj)
+    return ""
 
 # ==============================================================  
 # GET WORKSPACES
 # ==============================================================
 
+log("Fetching workspaces...")
 workspaces_df = fabric.list_workspaces()
 
 if SINGLE_WORKSPACE_NAME:
@@ -82,63 +165,371 @@ if SINGLE_WORKSPACE_NAME:
     log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
 
 log(f"Workspace count: {len(workspaces_df)}")
-log("")
+
+# Build workspaces_info with renamed columns
+for _, ws_row in workspaces_df.iterrows():
+    workspaces_info.append({
+        "WorkspaceId": safe_get(ws_row, "Id"),
+        "WorkspaceName": safe_get(ws_row, "Name"),
+        "WorkspaceType": safe_get(ws_row, "Type"),
+        "WorkspaceCapacityId": safe_get(ws_row, "Capacity Id")
+    })
+
+log(f"✓ Workspaces collected: {len(workspaces_info)}\n")
 
 # ==============================================================  
-# REPORT METADATA EXTRACTION
+# EXTRACT ENVIRONMENT METADATA
 # ==============================================================
 
-for ws_row in workspaces_df.itertuples(index=False):
-    ws_name = ws_row.Name
+# Create a single REST client instance to reuse
+client = FabricRestClient()
+
+for ws_info in workspaces_info:
+    ws_name = ws_info["WorkspaceName"]
+    ws_id = ws_info["WorkspaceId"]
+    
     log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
 
+    # -------------------- DATASETS --------------------
     try:
-        reports_df = fabric.list_reports(workspace=ws_name)
-        if reports_df is None or reports_df.empty:
-            log("  No reports found.")
-            continue
-
-        log(f"  Reports found: {len(reports_df)}")
-
-        for idx, rpt_row in enumerate(reports_df.itertuples(index=False), start=1):
-            rpt_name = rpt_row.Name
-            rpt_id = rpt_row.Id
-            model_id = rpt_row._asdict().get("DatasetId", "")
-
-            t0 = time.time()
-            log(f"\n  [{idx}/{len(reports_df)}] Extracting report: {rpt_name}")
-
-            try:
-                rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
-
-                # -------------------- Pages --------------------
-                df = rpt.list_pages()
-                log(f"    Pages: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_pages.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "Id": row.get("Page ID", ""),
-                            "Name": row.get("Page Name", ""),
-                            "Number": row.get("Page Number", 0),
-                            "Width": row.get("Width", 0),
-                            "Height": row.get("Height", 0),
-                            "HiddenFlag": bool(row.get("Hidden", False)),
-                            "VisualCount": row.get("Visual Count", 0),
-                            "Type": row.get("Display Option", ""),
-                            "ReportDate": REPORT_DATE
-                        })
-
-            except Exception as e:
-                log(f"    ERROR extracting {rpt_name}: {e}")
-
-            log(f"  → Finished {rpt_name} in {time.time() - t0:.1f} sec "
-                f"(Total: {elapsed_min():.2f} min)")
-
+        log(f"  Fetching datasets...")
+        datasets_df = fabric.list_datasets(workspace=ws_name)
+        
+        if datasets_df is not None and not datasets_df.empty:
+            log(f"  Datasets found: {len(datasets_df)}")
+            
+            for _, ds_row in datasets_df.iterrows():
+                dataset_id = safe_get(ds_row, "Dataset ID")
+                dataset_name = safe_get(ds_row, "Dataset Name")
+                
+                # Store in lookup
+                dataset_name_lookup[dataset_id] = dataset_name
+                
+                datasets_info.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DatasetId": dataset_id,
+                    "DatasetName": dataset_name,
+                    "DatasetDescription": safe_get(ds_row, "Description"),
+                    "DatasetWebUrl": safe_get(ds_row, "Web URL"),
+                    "DatasetConfiguredBy": safe_get(ds_row, "Configured By"),
+                    "DatasetIsRefreshable": safe_get(ds_row, "Is Refreshable", False),
+                    "DatasetTargetStorageMode": safe_get(ds_row, "Target Storage Mode"),
+                    "DatasetCreatedDate": safe_get(ds_row, "Created Date")
+                })
+                
+                # Fetch dataset sources using REST API
+                try:
+                    datasources_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/datasources"
+                    response = client.get(datasources_url)
+                    
+                    if response.status_code == 200:
+                        datasources = response.json().get('value', [])
+                        for datasource in datasources:
+                            dataset_sources_info.append({
+                                "WorkspaceId": ws_id,
+                                "WorkspaceName": ws_name,
+                                "DatasetId": dataset_id,
+                                "DatasetName": dataset_name,
+                                "DatasetDatasourceType": datasource.get("datasourceType", ""),
+                                "DatasetDatasourceId": datasource.get("datasourceId", ""),
+                                "DatasetDatasourceGatewayId": datasource.get("gatewayId", ""),
+                                "DatasetDatasourceConnectionDetails": serialize_json(datasource.get("connectionDetails"))
+                            })
+                except Exception as e:
+                    log(f"    Could not fetch dataset sources for {dataset_name}: {e}")
+                
+                # Fetch dataset refresh history
+                try:
+                    refresh_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshes"
+                    response = client.get(refresh_url)
+                    
+                    if response.status_code == 200:
+                        refreshes = response.json().get('value', [])
+                        for refresh in refreshes:
+                            dataset_refresh_history.append({
+                                "WorkspaceId": ws_id,
+                                "WorkspaceName": ws_name,
+                                "DatasetId": dataset_id,
+                                "DatasetName": dataset_name,
+                                "DatasetRefreshRequestId": refresh.get("requestId", ""),
+                                "DatasetRefreshId": refresh.get("id", ""),
+                                "DatasetRefreshStartTime": refresh.get("startTime", ""),
+                                "DatasetRefreshEndTime": refresh.get("endTime", ""),
+                                "DatasetRefreshStatus": refresh.get("status", ""),
+                                "DatasetRefreshType": refresh.get("refreshType", "")
+                            })
+                except Exception as e:
+                    log(f"    Could not fetch refresh history for {dataset_name}: {e}")
+        else:
+            log(f"  No datasets found")
+            
     except Exception as e:
-        log(f"ERROR accessing workspace {ws_name}: {e}")
+        log(f"  ERROR fetching datasets: {e}")
+
+    # -------------------- DATAFLOWS --------------------
+    try:
+        log(f"  Fetching dataflows...")
+        dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
+        response = client.get(dataflows_url)
+        
+        if response.status_code == 200:
+            dataflows = response.json().get('value', [])
+            log(f"  Dataflows found: {len(dataflows)}")
+            
+            for dataflow in dataflows:
+                dataflow_id = dataflow.get("objectId", "")
+                dataflow_name = dataflow.get("name", "")
+                
+                # Store in lookup
+                if dataflow_id:
+                    dataflow_name_lookup[dataflow_id] = dataflow_name
+                
+                dataflows_info.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DataflowId": dataflow_id,
+                    "DataflowName": dataflow_name,
+                    "DataflowDescription": dataflow.get("description", ""),
+                    "DataflowConfiguredBy": dataflow.get("configuredBy", ""),
+                    "DataflowModifiedBy": dataflow.get("modifiedBy", ""),
+                    "DataflowModifiedDateTime": dataflow.get("modifiedDateTime", ""),
+                    "DataflowJsonURL": dataflow.get("modelUrl", ""),
+                    "DataflowGeneration": dataflow.get("generation", "")
+                })
+                
+                # Fetch dataflow sources
+                try:
+                    dataflow_sources_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/datasources"
+                    sources_response = client.get(dataflow_sources_url)
+                    
+                    if sources_response.status_code == 200:
+                        sources = sources_response.json().get('value', [])
+                        for source in sources:
+                            dataflow_sources_info.append({
+                                "WorkspaceId": ws_id,
+                                "WorkspaceName": ws_name,
+                                "DataflowId": dataflow_id,
+                                "DataflowName": dataflow_name,
+                                "DataflowDatasourceType": source.get("datasourceType", ""),
+                                "DataflowDatasourceId": source.get("datasourceId", ""),
+                                "DataflowDatasourceGatewayId": source.get("gatewayId", ""),
+                                "DataflowDatasourceConnectionDetails": serialize_json(source.get("connectionDetails"))
+                            })
+                except Exception as e:
+                    log(f"    Could not fetch dataflow sources for {dataflow_name}: {e}")
+                
+                # Fetch dataflow refresh history (transactions)
+                try:
+                    refresh_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/transactions"
+                    refresh_response = client.get(refresh_url)
+                    
+                    if refresh_response.status_code == 200:
+                        refreshes = refresh_response.json().get('value', [])
+                        for refresh in refreshes:
+                            dataflow_refresh_history.append({
+                                "WorkspaceId": ws_id,
+                                "WorkspaceName": ws_name,
+                                "DataflowId": dataflow_id,
+                                "DataflowName": dataflow_name,
+                                "DataflowRefreshRequestId": refresh.get("requestId", ""),
+                                "DataflowRefreshId": refresh.get("id", ""),
+                                "DataflowRefreshStartTime": refresh.get("startTime", ""),
+                                "DataflowRefreshEndTime": refresh.get("endTime", ""),
+                                "DataflowRefreshStatus": refresh.get("status", ""),
+                                "DataflowRefreshType": refresh.get("refreshType", ""),
+                                "DataflowErrorInfo": serialize_json(refresh.get("errorInfo"))
+                            })
+                except Exception as e:
+                    log(f"    Could not fetch refresh history for {dataflow_name}: {e}")
+        else:
+            log(f"  No dataflows found")
+    except Exception as e:
+        log(f"  ERROR fetching dataflows: {e}")
+
+    # -------------------- FABRIC ITEMS --------------------
+    try:
+        log(f"  Fetching Fabric items...")
+        items_url = f"v1.0/workspaces/{ws_id}/items"
+        response = client.get(items_url)
+        
+        if response.status_code == 200:
+            items = response.json().get('value', [])
+            # Filter out Reports and SemanticModels as they're handled separately
+            filtered_items = [item for item in items if item.get('type') not in ['Report', 'SemanticModel']]
+            
+            log(f"  Fabric items found: {len(filtered_items)}")
+            
+            for item in filtered_items:
+                fabric_items_info.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "FabricItemID": item.get("id", ""),
+                    "FabricItemType": item.get("type", ""),
+                    "FabricItemName": item.get("displayName", ""),
+                    "FabricItemDescription": item.get("description", "")
+                })
+        else:
+            log(f"  No Fabric items found")
+    except Exception as e:
+        log(f"  ERROR fetching Fabric items: {e}")
+
+    # -------------------- REPORTS --------------------
+    try:
+        log(f"  Fetching reports...")
+        reports_df = fabric.list_reports(workspace=ws_name)
+        
+        if reports_df is not None and not reports_df.empty:
+            log(f"  Reports found: {len(reports_df)}")
+            
+            for _, rpt_row in reports_df.iterrows():
+                report_id = safe_get(rpt_row, "Id")
+                report_name = safe_get(rpt_row, "Name")
+                dataset_id = safe_get(rpt_row, "Dataset Id")
+                
+                # Get dataset name from lookup
+                dataset_name = dataset_name_lookup.get(dataset_id, "Unknown Dataset")
+                
+                reports_info.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "ReportId": report_id,
+                    "ReportName": report_name,
+                    "ReportDescription": safe_get(rpt_row, "Description"),
+                    "ReportWebUrl": safe_get(rpt_row, "Web URL"),
+                    "ReportEmbedUrl": safe_get(rpt_row, "Embed URL"),
+                    "ReportType": safe_get(rpt_row, "Report Type"),
+                    "DatasetId": dataset_id,
+                    "DatasetName": dataset_name
+                })
+                
+                # Fetch report pages using REST API
+                try:
+                    pages_url = f"v1.0/myorg/groups/{ws_id}/reports/{report_id}/pages"
+                    pages_response = client.get(pages_url)
+                    
+                    if pages_response.status_code == 200:
+                        pages = pages_response.json().get('value', [])
+                        for page in pages:
+                            report_pages_info.append({
+                                "WorkspaceId": ws_id,
+                                "WorkspaceName": ws_name,
+                                "ReportId": report_id,
+                                "ReportName": report_name,
+                                "PageName": page.get("name", ""),
+                                "PageDisplayName": page.get("displayName", ""),
+                                "PageOrder": page.get("order", 0)
+                            })
+                except Exception as e:
+                    log(f"    ERROR fetching pages for {report_name}: {e}")
+        else:
+            log(f"  No reports found")
+            
+    except Exception as e:
+        log(f"  ERROR fetching reports: {e}")
+
+    log(f"✓ Finished workspace: {ws_name}")
+
+# ==============================================================  
+# APPS AND APP REPORTS
+# ==============================================================
+
+log("\n" + "="*80)
+log("Fetching Apps and App Reports")
+log("="*80)
+
+try:
+    apps_url = "v1.0/myorg/apps"
+    response = client.get(apps_url)
+    
+    if response.status_code == 200:
+        apps = response.json().get('value', [])
+        log(f"Apps found: {len(apps)}")
+        
+        # Filter to only apps in our workspaces (create list once)
+        workspace_ids = [ws['WorkspaceId'] for ws in workspaces_info]
+        
+        for app in apps:
+            app_workspace_id = app.get("workspaceId", "")
+            
+            if app_workspace_id in workspace_ids:
+                app_id = app.get("id", "")
+                app_name = app.get("name", "")
+                
+                apps_info.append({
+                    "AppId": app_id,
+                    "AppName": app_name,
+                    "AppLastUpdate": app.get("lastUpdate", ""),
+                    "AppDescription": app.get("description", ""),
+                    "AppPublishedBy": app.get("publishedBy", ""),
+                    "AppWorkspaceId": app_workspace_id
+                })
+                
+                # Fetch reports within each app
+                try:
+                    app_reports_url = f"v1.0/myorg/apps/{app_id}/reports"
+                    app_reports_response = client.get(app_reports_url)
+                    
+                    if app_reports_response.status_code == 200:
+                        app_reports = app_reports_response.json().get('value', [])
+                        
+                        for report in app_reports:
+                            reports_in_app_info.append({
+                                "AppId": app_id,
+                                "AppName": app_name,
+                                "AppReportId": report.get("id", ""),
+                                "AppReportType": report.get("reportType", ""),
+                                "ReportName": report.get("name", ""),
+                                "AppReportWebUrl": report.get("webUrl", ""),
+                                "AppReportEmbedUrl": report.get("embedUrl", ""),
+                                "AppReportIsOwnedByMe": report.get("isOwnedByMe", False),
+                                "AppReportDatasetId": report.get("datasetId", ""),
+                                "ReportId": report.get("originalReportObjectId", "")
+                            })
+                except Exception as e:
+                    log(f"  ERROR fetching app reports for {app_name}: {e}")
+                    
+    else:
+        log(f"No apps found or unable to fetch apps")
+        
+except Exception as e:
+    log(f"ERROR fetching apps: {e}")
+
+# ==============================================================  
+# DATAFLOW LINEAGE
+# ==============================================================
+
+log("\n" + "="*80)
+log("Fetching Dataflow Lineage")
+log("="*80)
+
+for ws_info in workspaces_info:
+    ws_name = ws_info["WorkspaceName"]
+    ws_id = ws_info["WorkspaceId"]
+    
+    try:
+        lineage_url = f"v1.0/myorg/groups/{ws_id}/dataflows/upstreamDataflows"
+        response = client.get(lineage_url)
+        
+        if response.status_code == 200:
+            lineage_items = response.json().get('value', [])
+            
+            for lineage in lineage_items:
+                dataflow_id = lineage.get("dataflowObjectId", "")
+                dataset_id = lineage.get("datasetObjectId", "")
+                
+                dataflow_lineage.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DataflowId": dataflow_id,
+                    "DataflowName": dataflow_name_lookup.get(dataflow_id, "Unknown Dataflow"),
+                    "DatasetId": dataset_id,
+                    "DatasetName": dataset_name_lookup.get(dataset_id, "Unknown Dataset")
+                })
+    except Exception as e:
+        log(f"  Could not fetch dataflow lineage for {ws_name}: {e}")
+
+log("✓ Dataflow lineage collection complete")
 
 # ==============================================================  
 # WRITE TO LAKEHOUSE
@@ -148,14 +539,27 @@ log("\n" + "="*80)
 log("Writing output to Lakehouse")
 log("="*80)
 
-def write_table(data, name):
+def write_table(data, name, sample_row=None):
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    
     if not data:
-        log(f"⚠ Empty table skipped: {name}")
+        # Create empty table using sample row structure if provided
+        if sample_row:
+            log(f"Creating empty table with schema: {name}")
+            pandas_df = pd.DataFrame([sample_row])
+            df = spark.createDataFrame(pandas_df)
+            # Filter to create empty dataframe with schema
+            empty_df = df.filter("1=0")
+            empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+            log(f"✓ Created empty table: {full_name}\n")
+        else:
+            log(f"⚠ Empty table skipped (no schema): {name}\n")
         return
 
-    df = spark.createDataFrame(pd.DataFrame(data))
+    # Convert to pandas DataFrame first for proper type handling, then to Spark
+    pandas_df = pd.DataFrame(data)
+    df = spark.createDataFrame(pandas_df)
     count = df.count()
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
 
     log(f"Writing {count} rows → {full_name}")
 
@@ -163,8 +567,20 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-write_table(all_pages, "Pages")
-
+# Write all tables matching PowerShell script worksheets
+write_table(workspaces_info, "Workspaces", SAMPLE_ROWS.get("Workspaces"))
+write_table(fabric_items_info, "FabricItems", SAMPLE_ROWS.get("FabricItems"))
+write_table(datasets_info, "Datasets", SAMPLE_ROWS.get("Datasets"))
+write_table(dataset_sources_info, "DatasetSourcesInfo", SAMPLE_ROWS.get("DatasetSourcesInfo"))
+write_table(dataset_refresh_history, "DatasetRefreshHistory", SAMPLE_ROWS.get("DatasetRefreshHistory"))
+write_table(dataflows_info, "Dataflows", SAMPLE_ROWS.get("Dataflows"))
+write_table(dataflow_lineage, "DataflowLineage", SAMPLE_ROWS.get("DataflowLineage"))
+write_table(dataflow_sources_info, "DataflowSourcesInfo", SAMPLE_ROWS.get("DataflowSourcesInfo"))
+write_table(dataflow_refresh_history, "DataflowRefreshHistory", SAMPLE_ROWS.get("DataflowRefreshHistory"))
+write_table(reports_info, "Reports", SAMPLE_ROWS.get("Reports"))
+write_table(report_pages_info, "ReportPages", SAMPLE_ROWS.get("ReportPages"))
+write_table(apps_info, "Apps", SAMPLE_ROWS.get("Apps"))
+write_table(reports_in_app_info, "AppReports", SAMPLE_ROWS.get("AppReports"))
 
 # ==============================================================  
 # END
