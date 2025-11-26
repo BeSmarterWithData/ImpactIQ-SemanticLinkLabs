@@ -14,7 +14,7 @@ from sempy_labs.tom import TOMWrapper
 # CONFIG
 # -----------------------------------
 LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = "TestGov"   # <-- or set to None to scan all
+SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
 if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
