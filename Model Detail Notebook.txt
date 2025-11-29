@@ -574,7 +574,7 @@ def write_table(data, name):
         df = spark.createDataFrame(pd.DataFrame(data))
         # Filter out the template row to create truly empty table
         empty_df = df.filter("1=0")
-        empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+        empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
         log(f"✓ Created empty table: {full_name}\n")
         return
 
@@ -585,7 +585,7 @@ def write_table(data, name):
 
     log(f"Writing {count} rows → {full_name}")
 
-    actual_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+    actual_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
 
     log(f"✓ Wrote table: {full_name}\n")
 
