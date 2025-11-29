@@ -9,6 +9,7 @@ import time, re, pandas as pd
 from datetime import datetime
 import sempy.fabric as fabric
 from sempy_labs.tom import TOMWrapper
+from sempy_labs._model_dependencies import get_model_calc_dependencies
 
 # -----------------------------------
 # CONFIG
@@ -91,6 +92,46 @@ all_model_details = [{
     "RelationshipToCardinality": "",
     "RelationshipCrossFilteringBehavior": ""
 }]
+
+# Schema template for model dependencies
+# Based on the Measure Dependency Extract Script.csx from:
+# https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution
+all_model_dependencies = [{
+    "ObjectName": "",
+    "ObjectType": "",
+    "DependsOn": "",
+    "DependsOnType": "",
+    "ModelAsOfDate": "",
+    "ModelName": "",
+    "ModelID": ""
+}]
+
+# ==============================================================  
+# HELPER FUNCTIONS
+# ==============================================================
+
+def format_dax_object_name(table_name, object_name):
+    """Format a DAX object name as 'TableName'[ObjectName]"""
+    return f"'{table_name}'[{object_name}]"
+
+def get_dependency_name(dep_obj):
+    """
+    Get the formatted name of a dependency object based on its type.
+    
+    Args:
+        dep_obj: The TOM object representing the dependency
+    
+    Returns:
+        str: The formatted dependency name
+    """
+    dep_type = str(dep_obj.ObjectType)
+    
+    if dep_type in ["Measure", "Column"]:
+        return format_dax_object_name(dep_obj.Parent.Name, dep_obj.Name)
+    elif dep_type == "Table":
+        return f"'{dep_obj.Name}'"
+    else:
+        return dep_obj.Name
 
 # ==============================================================  
 # GET WORKSPACES
@@ -416,6 +457,73 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipCrossFilteringBehavior": r.CrossFilteringBehavior.ToString()
                     })
 
+                # -------------------- Model Dependencies --------------------
+                # Uses TOMWrapper.depends_on method documented at:
+                # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
+                try:
+                    dependencies_df = get_model_calc_dependencies(
+                        dataset=model_name,
+                        workspace=ws_name
+                    )
+                    
+                    if dependencies_df is not None and not dependencies_df.empty:
+                        dep_count_before = len(all_model_dependencies)
+                        
+                        # Measure Dependencies
+                        for m in measures:
+                            try:
+                                for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": m.Name,
+                                        "ObjectType": "Measure",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
+
+                        # Calculated Column Dependencies
+                        for col in calc_columns:
+                            try:
+                                for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": col.Name,
+                                        "ObjectType": "CalculatedColumn",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
+
+                        # Calculation Item Dependencies
+                        for ci in calc_items:
+                            try:
+                                for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": ci.Name,
+                                        "ObjectType": "CalculationItem",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")
+                        
+                        dep_count = len(all_model_dependencies) - dep_count_before
+                        log(f"    Dependencies extracted: {dep_count}")
+                    else:
+                        log(f"    No dependencies found")
+                except Exception as e:
+                    log(f"    Warning: Could not extract dependencies: {e}")
+
             except Exception as e:
                 log(f"    ERROR extracting {model_name}: {e}")
 
@@ -467,6 +575,7 @@ def write_table(data, name):
     log(f"✓ Wrote table: {full_name}\n")
 
 write_table(all_model_details, "ModelDetail")
+write_table(all_model_dependencies, "ModelDependencies")
 
 # ==============================================================  
 # END
