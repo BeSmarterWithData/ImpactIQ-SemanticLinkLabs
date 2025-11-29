@@ -1,0 +1,437 @@
+# ================================
+# FABRIC DATAFLOW DETAIL EXTRACTOR
+# WITH AUTO-SCHEMA CREATION
+# ================================
+#
+# This notebook extracts dataflow detail metadata (queries/entities)
+# using Fabric REST APIs, similar to the PowerShell script from:
+# https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution
+#
+# EXTRACTED DATA (written to lakehouse tables):
+# 1. DataflowDetail - dataflow queries with M expressions
+#
+# Column names match the PowerShell script output:
+# - Dataflow ID
+# - Dataflow Name
+# - Query Name
+# - Query (M expression)
+# - Report Date
+# - Workspace Name - Dataflow Name
+# ================================
+
+%pip install semantic-link-labs --quiet
+
+import time, re, pandas as pd, json, base64
+from datetime import datetime
+import sempy.fabric as fabric
+from sempy.fabric import FabricRestClient
+
+# -----------------------------------
+# CONFIG
+# -----------------------------------
+LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
+SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
+
+# Validate lakehouse name
+if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
+    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+
+EXTRACTION_TIMESTAMP = datetime.now()
+REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
+start_time = time.time()
+
+# -----------------------------------
+# Logging helpers
+# -----------------------------------
+def log(msg):
+    print(msg, flush=True)
+
+def elapsed_min():
+    return (time.time() - start_time) / 60
+
+# Heartbeat
+import threading
+heartbeat_running = True
+def heartbeat():
+    while heartbeat_running:
+        time.sleep(10)
+        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
+
+threading.Thread(target=heartbeat, daemon=True).start()
+
+# -----------------------------------
+# Start banner
+# -----------------------------------
+log("="*80)
+log("FABRIC DATAFLOW DETAIL EXTRACTION")
+log(f"Started: {EXTRACTION_TIMESTAMP}")
+log("="*80)
+
+# ============================================
+# AUTO-CREATE SCHEMA (LAKEHOUSE)
+# ============================================
+CATALOG = spark.sql("SELECT current_catalog()").first()[0]
+log(f"Using catalog: {CATALOG}")
+
+schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+log(f"Ensuring lakehouse schema exists: {schema_name}")
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+log(f"✓ Schema is ready: {schema_name}\n")
+
+# ==============================================================  
+# COLLECTIONS & SCHEMA TEMPLATES
+# ==============================================================
+# Each collection includes a template row that defines the schema.
+# This ensures empty tables can be created with correct column structure.
+# Schema matches the PowerShell script output from Final PS Script.txt
+
+all_dataflow_details = [{
+    "DataflowId": "",
+    "DataflowName": "",
+    "QueryName": "",
+    "Query": "",
+    "ReportDate": "",
+    "WorkspaceNameDataflowName": ""
+}]
+
+# ==============================================================  
+# HELPER FUNCTIONS
+# ==============================================================
+
+def clean_name(name):
+    """Clean up names for file/display purposes (matches PowerShell script pattern)"""
+    clean = name.replace('[', '(').replace(']', ')')
+    clean = re.sub(r'[^a-zA-Z0-9\(\)&,.\- ]', ' ', clean)
+    return clean.strip()
+
+def parse_power_query_document(document_content, dataflow_id, dataflow_name, workspace_name, report_date):
+    """
+    Parse Power Query document content to extract queries.
+    Handles both Gen1 and Gen2 dataflow document formats.
+    
+    Args:
+        document_content: The Power Query M document content
+        dataflow_id: Dataflow ID
+        dataflow_name: Dataflow name
+        workspace_name: Workspace name
+        report_date: Report date
+    
+    Returns:
+        List of query dictionaries
+    """
+    queries = []
+    
+    clean_workspace_name = clean_name(workspace_name)
+    clean_dataflow_name = clean_name(dataflow_name)
+    workspace_dataflow_name = f"{clean_workspace_name} ~ {clean_dataflow_name}"
+    
+    # Unescape content if needed (Gen1 dataflows have escaped content)
+    document_content = document_content.replace('\\r\\n', '\n').replace('\\n', '\n')
+    document_content = document_content.replace('\\"', '"')
+    
+    # Split by "section Section1;" to get the queries section
+    sections = document_content.split('section Section1;', 1)
+    
+    if len(sections) < 2:
+        return queries
+    
+    queries_section = sections[1]
+    
+    # Use regex to find all queries in Power Query M document format
+    # Pattern breakdown:
+    #   (?s)                           - DOTALL mode: dot matches newlines
+    #   (?:\[[^\]]*\]\s*)?             - Optional metadata annotations like [IsEnabled=false]
+    #   shared\s+                       - "shared" keyword followed by whitespace
+    #   (?:#"(.*?)"|([A-Za-z_]\w*))    - Query name: either #"quoted name" (group 1) or unquoted identifier (group 2)
+    #   \s*=\s*                         - Assignment operator with optional whitespace
+    #   (.*?)                           - Query expression (group 3) - non-greedy capture
+    #   (?=...)                         - Lookahead: stop before next "shared" keyword or end of string
+    # Supports both: shared QueryName = ... and shared #"Query Name With Spaces" = ...
+    pattern = r'(?s)(?:\[[^\]]*\]\s*)?shared\s+(?:#"(.*?)"|([A-Za-z_]\w*))\s*=\s*(.*?)(?=(?:\[[^\]]*\]\s*)?shared\s+(?:#"(?:.*?)"|[A-Za-z_]\w*)\s*=|$)'
+    matches = re.findall(pattern, queries_section)
+    
+    for match in matches:
+        # Group 0 = hash-quoted name, Group 1 = unquoted name, Group 2 = expression
+        query_name = match[0] if match[0] else match[1]
+        query_expression = match[2].strip()
+        
+        # Remove trailing semicolons
+        query_expression = re.sub(r';\s*$', '', query_expression).strip()
+        
+        # Skip if empty
+        if not query_name or not query_expression:
+            continue
+        
+        queries.append({
+            "DataflowId": dataflow_id,
+            "DataflowName": dataflow_name,
+            "QueryName": query_name,
+            "Query": query_expression,
+            "ReportDate": report_date,
+            "WorkspaceNameDataflowName": workspace_dataflow_name
+        })
+    
+    return queries
+
+def extract_gen2_dataflow(client, workspace_id, dataflow_id, dataflow_name, workspace_name, report_date):
+    """
+    Extract Gen2 (Fabric) dataflow definition using getDefinition API.
+    
+    Args:
+        client: FabricRestClient instance
+        workspace_id: Workspace ID
+        dataflow_id: Dataflow ID
+        dataflow_name: Dataflow name
+        workspace_name: Workspace name
+        report_date: Report date
+    
+    Returns:
+        List of query dictionaries
+    """
+    queries = []
+    
+    try:
+        # Use Fabric API to get dataflow definition
+        endpoint = f"v1/workspaces/{workspace_id}/dataflows/{dataflow_id}/getDefinition"
+        response = client.post(endpoint, json={})
+        
+        if response.status_code != 200:
+            return queries
+        
+        response_data = response.json()
+        
+        if not response_data.get('definition', {}).get('parts'):
+            return queries
+        
+        # Find the .pq file in the parts
+        for part in response_data['definition']['parts']:
+            file_path = part.get('path', '')
+            payload_type = part.get('payloadType', '')
+            payload = part.get('payload', '')
+            
+            if file_path.endswith('.pq') and payload_type == 'InlineBase64':
+                # Decode Base64 content
+                try:
+                    decoded_bytes = base64.b64decode(payload)
+                    pq_content = decoded_bytes.decode('utf-8')
+                    
+                    # Parse the Power Query document
+                    queries = parse_power_query_document(
+                        pq_content,
+                        dataflow_id,
+                        dataflow_name,
+                        workspace_name,
+                        report_date
+                    )
+                    break
+                except Exception as e:
+                    log(f"      Error decoding Gen2 dataflow content: {e}")
+    
+    except Exception as e:
+        log(f"    Could not extract Gen2 dataflow {dataflow_name}: {e}")
+    
+    return queries
+
+def extract_gen1_dataflow(client, workspace_id, dataflow_id, dataflow_name, workspace_name, report_date):
+    """
+    Extract Gen1 (Power BI) dataflow definition using REST API.
+    
+    Args:
+        client: FabricRestClient instance
+        workspace_id: Workspace ID
+        dataflow_id: Dataflow ID
+        dataflow_name: Dataflow name
+        workspace_name: Workspace name
+        report_date: Report date
+    
+    Returns:
+        List of query dictionaries
+    """
+    queries = []
+    
+    try:
+        # Use Power BI API to get dataflow definition
+        api_url = f"v1.0/myorg/groups/{workspace_id}/dataflows/{dataflow_id}"
+        response = client.get(api_url)
+        
+        if response.status_code != 200:
+            return queries
+        
+        dataflow_json = response.json()
+        
+        # Check for pbi:mashup document content
+        if 'pbi:mashup' not in dataflow_json or 'document' not in dataflow_json['pbi:mashup']:
+            return queries
+        
+        document_content = dataflow_json['pbi:mashup']['document']
+        
+        # Parse the Power Query document
+        queries = parse_power_query_document(
+            document_content,
+            dataflow_id,
+            dataflow_name,
+            workspace_name,
+            report_date
+        )
+    
+    except Exception as e:
+        log(f"    Could not extract Gen1 dataflow {dataflow_name}: {e}")
+    
+    return queries
+
+# ==============================================================  
+# GET WORKSPACES
+# ==============================================================
+
+workspaces_df = fabric.list_workspaces()
+
+if SINGLE_WORKSPACE_NAME:
+    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+    if workspaces_df.empty:
+        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
+    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+
+log(f"Workspace count: {len(workspaces_df)}")
+log("")
+
+# Create REST client instance
+client = FabricRestClient()
+
+# ==============================================================  
+# DATAFLOW DETAIL EXTRACTION
+# ==============================================================
+
+for ws_row in workspaces_df.itertuples(index=False):
+    ws_name = ws_row.Name
+    ws_id = ws_row.Id
+    log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
+
+    # -------------------- Gen1 Dataflows (Power BI API) --------------------
+    try:
+        log(f"  Fetching Gen1 dataflows...")
+        dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
+        response = client.get(dataflows_url)
+        
+        if response.status_code == 200:
+            dataflows = response.json().get('value', [])
+            log(f"  Gen1 Dataflows found: {len(dataflows)}")
+            
+            for dataflow in dataflows:
+                dataflow_id = dataflow.get('objectId', '')
+                dataflow_name = dataflow.get('name', '')
+                
+                log(f"    Extracting: {dataflow_name}")
+                
+                queries = extract_gen1_dataflow(
+                    client,
+                    ws_id,
+                    dataflow_id,
+                    dataflow_name,
+                    ws_name,
+                    REPORT_DATE
+                )
+                
+                if queries:
+                    all_dataflow_details.extend(queries)
+                    log(f"      Queries extracted: {len(queries)}")
+                else:
+                    log(f"      No queries found")
+        else:
+            log(f"  No Gen1 dataflows found")
+    except Exception as e:
+        log(f"  ERROR fetching Gen1 dataflows: {e}")
+
+    # -------------------- Gen2 Dataflows (Fabric API) --------------------
+    try:
+        log(f"  Fetching Gen2 dataflows...")
+        items_url = f"v1/workspaces/{ws_id}/items"
+        response = client.get(items_url)
+        
+        if response.status_code == 200:
+            items = response.json().get('value', [])
+            gen2_dataflows = [item for item in items if item.get('type') == 'Dataflow']
+            
+            log(f"  Gen2 Dataflows found: {len(gen2_dataflows)}")
+            
+            for dataflow in gen2_dataflows:
+                dataflow_id = dataflow.get('id', '')
+                dataflow_name = dataflow.get('displayName', '')
+                
+                log(f"    Extracting: {dataflow_name}")
+                
+                queries = extract_gen2_dataflow(
+                    client,
+                    ws_id,
+                    dataflow_id,
+                    dataflow_name,
+                    ws_name,
+                    REPORT_DATE
+                )
+                
+                if queries:
+                    all_dataflow_details.extend(queries)
+                    log(f"      Queries extracted: {len(queries)}")
+                else:
+                    log(f"      No queries found")
+        else:
+            log(f"  No Gen2 dataflows found")
+    except Exception as e:
+        log(f"  ERROR fetching Gen2 dataflows: {e}")
+    
+    log(f"✓ Finished workspace: {ws_name}")
+
+# ==============================================================  
+# WRITE TO LAKEHOUSE
+# ==============================================================
+
+log("\n" + "="*80)
+log("Writing output to Lakehouse")
+log("="*80)
+
+def write_table(data, name):
+    """
+    Write data to a Delta table. Schema is inferred from the first row (template).
+    Creates empty table with schema if only template row exists.
+    
+    Args:
+        data: List of dictionaries containing the data (first row is schema template)
+        name: Name of the table
+    """
+    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    
+    # Check if we only have the template row (length 1 means just the schema template)
+    if len(data) == 1:
+        log(f"⚠ No data for {name}, creating empty table with schema")
+        # Use template to create empty DataFrame with correct schema
+        df = spark.createDataFrame(pd.DataFrame(data))
+        # Filter out the template row to create truly empty table
+        empty_df = df.filter("1=0")
+        empty_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+        log(f"✓ Created empty table: {full_name}\n")
+        return
+
+    # Skip the template row (first row) and create DataFrame with actual data
+    pandas_df = pd.DataFrame(data)
+    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
+    count = actual_df.count()
+
+    log(f"Writing {count} rows → {full_name}")
+
+    actual_df.write.mode("overwrite").format("delta").saveAsTable(full_name)
+
+    log(f"✓ Wrote table: {full_name}\n")
+
+write_table(all_dataflow_details, "DataflowDetail")
+
+# ==============================================================  
+# END
+# ==============================================================
+
+heartbeat_running = False
+
+log("\n" + "="*80)
+log("PROCESS COMPLETE")
+log(f"Finished at: {datetime.now()}")
+log(f"Total runtime: {elapsed_min():.2f} minutes")
+log("="*80)
