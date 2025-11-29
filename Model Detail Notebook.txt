@@ -83,6 +83,7 @@ all_model_details = [{
     "ModelAsOfDate": "",
     "ModelName": "",
     "ModelID": "",
+    "WorkspaceName": "",
     "RelationshipFromTable": "",
     "RelationshipFromColumn": "",
     "RelationshipToTable": "",
@@ -103,7 +104,8 @@ all_model_dependencies = [{
     "DependsOnType": "",
     "ModelAsOfDate": "",
     "ModelName": "",
-    "ModelID": ""
+    "ModelID": "",
+    "WorkspaceName": ""
 }]
 
 # ==============================================================  
@@ -199,6 +201,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -226,6 +229,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -253,6 +257,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -280,6 +285,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -307,6 +313,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -334,6 +341,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -361,6 +369,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -388,6 +397,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -420,6 +430,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": "",
                         "RelationshipFromColumn": "",
                         "RelationshipToTable": "",
@@ -447,6 +458,7 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "ModelAsOfDate": REPORT_DATE,
                         "ModelName": model_name,
                         "ModelID": model_id,
+                        "WorkspaceName": ws_name,
                         "RelationshipFromTable": r.FromTable.Name,
                         "RelationshipFromColumn": r.FromColumn.Name,
                         "RelationshipToTable": r.ToTable.Name,
@@ -480,7 +492,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                                         "DependsOnType": str(dep_obj.ObjectType),
                                         "ModelAsOfDate": REPORT_DATE,
                                         "ModelName": model_name,
-                                        "ModelID": model_id
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
                                     })
                             except Exception as e:
                                 log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
@@ -496,7 +509,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                                         "DependsOnType": str(dep_obj.ObjectType),
                                         "ModelAsOfDate": REPORT_DATE,
                                         "ModelName": model_name,
-                                        "ModelID": model_id
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
                                     })
                             except Exception as e:
                                 log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
@@ -512,7 +526,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                                         "DependsOnType": str(dep_obj.ObjectType),
                                         "ModelAsOfDate": REPORT_DATE,
                                         "ModelName": model_name,
-                                        "ModelID": model_id
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
                                     })
                             except Exception as e:
                                 log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")

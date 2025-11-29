@@ -129,8 +129,8 @@ SAMPLE_ROWS = {
     "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
     "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
-    "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": ""},
-    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": False, "AppReportDatasetId": "", "ReportId": ""}
+    "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
+    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": False, "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""}
 }
 
 # ==============================================================  
@@ -448,6 +448,8 @@ try:
         
         # Filter to only apps in our workspaces (create list once)
         workspace_ids = [ws['WorkspaceId'] for ws in workspaces_info]
+        # Create workspace ID to name lookup
+        workspace_name_lookup = {ws['WorkspaceId']: ws['WorkspaceName'] for ws in workspaces_info}
         
         for app in apps:
             app_workspace_id = app.get("workspaceId", "")
@@ -455,6 +457,7 @@ try:
             if app_workspace_id in workspace_ids:
                 app_id = app.get("id", "")
                 app_name = app.get("name", "")
+                app_workspace_name = workspace_name_lookup.get(app_workspace_id, "")
                 
                 apps_info.append({
                     "AppId": app_id,
@@ -462,7 +465,8 @@ try:
                     "AppLastUpdate": app.get("lastUpdate", ""),
                     "AppDescription": app.get("description", ""),
                     "AppPublishedBy": app.get("publishedBy", ""),
-                    "AppWorkspaceId": app_workspace_id
+                    "AppWorkspaceId": app_workspace_id,
+                    "WorkspaceName": app_workspace_name
                 })
                 
                 # Fetch reports within each app
@@ -484,7 +488,8 @@ try:
                                 "AppReportEmbedUrl": report.get("embedUrl", ""),
                                 "AppReportIsOwnedByMe": report.get("isOwnedByMe", False),
                                 "AppReportDatasetId": report.get("datasetId", ""),
-                                "ReportId": report.get("originalReportObjectId", "")
+                                "ReportId": report.get("originalReportObjectId", ""),
+                                "WorkspaceName": app_workspace_name
                             })
                 except Exception as e:
                     log(f"  ERROR fetching app reports for {app_name}: {e}")
