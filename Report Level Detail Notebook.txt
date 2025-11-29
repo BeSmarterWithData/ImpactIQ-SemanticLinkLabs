@@ -71,17 +71,17 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # Each collection includes a template row that defines the schema.
 # This ensures empty tables can be created with correct column structure.
 
-all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": ""}]
-all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "ReportDate": ""}]
-all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "ParentGroup": "", "ReportDate": ""}]
-all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "ReportDate": ""}]
-all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": ""}]
-all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": ""}]
-all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": ""}]
-all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "ReportDate": ""}]
-all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ReportDate": ""}]
-all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "ReportDate": ""}]
-all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "TypeID": "", "Type": "", "ReportDate": ""}]
+all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""}]
+all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
+all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "ReportDate": "", "WorkspaceName": ""}]
+all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": "", "WorkspaceName": ""}]
+all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
 
 # ==============================================================  
 # GET WORKSPACES
@@ -142,7 +142,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                 "ReportDate": REPORT_DATE,
                 "ReportName": rpt_name,
                 "Type": "",
-                "ServerName": ""
+                "ServerName": "",
+                "WorkspaceName": ws_name
             })
 
             t0 = time.time()
@@ -168,7 +169,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "HiddenFlag": bool(row.get("Hidden", False)),
                             "VisualCount": row.get("Visual Count", 0),
                             "Type": row.get("Display Option", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Visuals --------------------
@@ -194,7 +196,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "Height": row.get("Height", 0),
                             "ObjectCount": row.get("Visual Object Count", 0),
                             "ParentGroup": "",  # Note: Parent group not available in list_visuals() output
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Bookmarks --------------------
@@ -212,7 +215,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "PageId": row.get("Page Name", ""),
                             "VisualId": row.get("Visual Name", ""),
                             "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Custom Visuals --------------------
@@ -225,7 +229,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ReportID": rpt_id,
                             "ModelID": model_id,
                             "Name": row.get("Custom Visual Display Name", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Report Filters --------------------
@@ -244,7 +249,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "FilterType": row.get("Type", ""),
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Page Filters --------------------
@@ -265,7 +271,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "FilterType": row.get("Type", ""),
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Visual Filters --------------------
@@ -287,7 +294,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "HiddenFilter": str(bool(row.get("Hidden", False))),
                             "LockedFilter": str(bool(row.get("Locked", False))),
                             "displayName": row.get("Filter Name", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Visual Objects --------------------
@@ -309,7 +317,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "ObjectType": row.get("Object Type", ""),
                             "Source": "",  # Note: Source not available in list_visual_objects() output
                             "displayName": row.get("Object Display Name", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Report-Level Measures --------------------
@@ -327,7 +336,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "Expression": row.get("Expression", ""),
                             "HiddenFlag": "False",  # Note: Hidden flag not available in list_report_level_measures() - report-level measures are typically visible
                             "FormatString": row.get("Format String", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
                 # -------------------- Visual Interactions --------------------
@@ -345,7 +355,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                             "TargetVisualID": row.get("Target Visual Name", ""),
                             "TypeID": "",  # Note: TypeID not available from semantic-link-labs
                             "Type": row.get("Type", ""),
-                            "ReportDate": REPORT_DATE
+                            "ReportDate": REPORT_DATE,
+                            "WorkspaceName": ws_name
                         })
 
             except Exception as e:

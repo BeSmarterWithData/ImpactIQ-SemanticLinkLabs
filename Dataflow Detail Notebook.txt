@@ -92,6 +92,7 @@ all_dataflow_details = [{
     "QueryName": "",
     "Query": "",
     "ReportDate": "",
+    "WorkspaceName": "",
     "WorkspaceNameDataflowName": ""
 }]
 
@@ -169,6 +170,7 @@ def parse_power_query_document(document_content, dataflow_id, dataflow_name, wor
             "QueryName": query_name,
             "Query": query_expression,
             "ReportDate": report_date,
+            "WorkspaceName": workspace_name,
             "WorkspaceNameDataflowName": workspace_dataflow_name
         })
     
