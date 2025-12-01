@@ -38,7 +38,7 @@ from sempy.fabric import FabricRestClient
 # -----------------------------------
 # CONFIG
 # -----------------------------------
-LAKEHOUSE_NAME = ""          # <-- CHANGE THIS
+LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
 SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
 
 # Validate lakehouse name
@@ -91,17 +91,6 @@ log(f"Ensuring lakehouse schema exists: {schema_name}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
 log(f"✓ Schema is ready: {schema_name}\n")
 
-# ==============================================================  
-# SPARK TIMEOUT CONFIGURATION
-# ==============================================================
-# Configure Spark to handle long-running operations (>1 hour)
-# Setting timeouts to 10 hours (36000 seconds) to prevent session timeouts
-spark.conf.set("spark.network.timeout", "36000s")
-spark.conf.set("spark.rpc.askTimeout", "36000s")
-spark.conf.set("spark.sql.broadcastTimeout", "36000")
-spark.conf.set("spark.storage.blockManagerSlaveTimeoutMs", "36000000")
-spark.conf.set("spark.executor.heartbeatInterval", "60s")
-log("✓ Spark timeout configuration set (10 hour timeout)\n")
 
 # ==============================================================  
 # COLLECTIONS - Matching PowerShell script structure
