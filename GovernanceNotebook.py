@@ -3,7 +3,86 @@
 
 # ## GovernanceNotebook
 # 
-# New notebook
+# IMPORTANT: Before running this notebook:
+# 1. use Explorer to the left to "Add data items" and create a New Lakehouse or choose an Existing Lakehouse
+# 2. Set Environment to an environment with Semantic Link Labs pre-installed. 
+# 3. If an environment is not set up, you cannot schedule this notebook in a Pipeline. You must also remove the "#" before "%pip install semantic-link-labs --quiet" in line 16.
+# --------------------------------------------
+# CONFIGURATION - No changes needed by default
+# --------------------------------------------
+LAKEHOUSE_SCHEMA = "dbo"          # <-- =Schema name in your attached Lakehouse - "dbo" is the typical default.
+WORKSPACE_NAMES = ["All"]         # <-- ["All"] to scan and loop through all workspaces, or ["Workspace1", "Workspace2"] for specific workspaces (max 10)
+
+# %pip install semantic-link-labs --quiet
+
+# -----------------------------------
+# PERFORMANCE SETTINGS
+# -----------------------------------
+# MAX_PARALLEL_WORKERS: Number of parallel API calls (1-10)
+#     - Higher values = faster extraction but more API load
+#     - Lower values = slower but gentler on API rate limits
+#     - Recommended: 3-5 for most environments
+
+MAX_PARALLEL_WORKERS = 5
+
+# In[0]:
+
+# ================================
+# CONFIGURATION (SHARED ACROSS ALL CELLS)
+# ================================
+# 
+# IMPORTANT: Before running this notebook:
+# 1. Attach a default Lakehouse to this notebook
+# 2. Configure the settings below
+# 
+# LAKEHOUSE_SCHEMA: The schema name where tables will be written.
+#     This defines the schema within your attached Lakehouse.
+#     Must contain only alphanumeric characters and underscores.
+#
+# WORKSPACE_NAMES: List of workspace names to scan.
+#     - ["All"] (default) - Scans all workspaces you have access to
+#     - ["Workspace1"] - Scans a single workspace
+#     - ["Workspace1", "Workspace2", "Workspace3"] - Scans multiple workspaces (up to 10)
+#
+# ================================
+
+import re
+
+# Validate MAX_PARALLEL_WORKERS
+if not isinstance(MAX_PARALLEL_WORKERS, int) or MAX_PARALLEL_WORKERS < 1 or MAX_PARALLEL_WORKERS > 10:
+    raise ValueError("MAX_PARALLEL_WORKERS must be an integer between 1 and 10.")
+
+# -----------------------------------
+# CONFIGURATION VALIDATION
+# -----------------------------------
+# Validate lakehouse schema name
+if not LAKEHOUSE_SCHEMA:
+    raise ValueError("LAKEHOUSE_SCHEMA must be set! Please provide a valid schema name (alphanumeric and underscores only).")
+    
+if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_SCHEMA):
+    raise ValueError(f"Invalid lakehouse schema name: '{LAKEHOUSE_SCHEMA}'. Must contain only alphanumeric characters and underscores.")
+
+# Validate workspace names
+if not isinstance(WORKSPACE_NAMES, list):
+    raise ValueError("WORKSPACE_NAMES must be a list. Use ['All'] to scan all workspaces, or ['Workspace1', 'Workspace2'] for specific workspaces.")
+
+if len(WORKSPACE_NAMES) == 0:
+    raise ValueError("WORKSPACE_NAMES cannot be empty. Use ['All'] to scan all workspaces.")
+
+if len(WORKSPACE_NAMES) > 10:
+    raise ValueError("WORKSPACE_NAMES can contain at most 10 workspace names. Use ['All'] to scan all workspaces.")
+
+# Check if scanning all workspaces (case-insensitive check for "All")
+SCAN_ALL_WORKSPACES = (len(WORKSPACE_NAMES) == 1 and WORKSPACE_NAMES[0].lower() == "all")
+
+print(f"Configuration loaded:")
+print(f"  Lakehouse Schema: {LAKEHOUSE_SCHEMA}")
+if SCAN_ALL_WORKSPACES:
+    print(f"  Workspaces: All (scanning all accessible workspaces)")
+else:
+    print(f"  Workspaces: {WORKSPACE_NAMES}")
+print(f"  Parallel Workers: {MAX_PARALLEL_WORKERS}")
+
 
 # In[1]:
 
@@ -33,6 +112,12 @@
 # 13. AppReports - reports within apps
 #
 # All column names are renamed to match the PowerShell script output.
+#
+# PERFORMANCE OPTIMIZATIONS:
+# - Batch REST API calls where possible
+# - Reuse single FabricRestClient instance
+# - Use efficient pandas operations for data collection
+# - Parallel processing with ThreadPoolExecutor for independent API calls
 # ================================
 
 # %pip install semantic-link-labs --quiet
@@ -42,21 +127,9 @@ import re
 import pandas as pd
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
 from sempy.fabric import FabricRestClient
-
-# -----------------------------------
-# CONFIG
-# -----------------------------------
-LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
-
-# Validate lakehouse name
-if not LAKEHOUSE_NAME:
-    raise ValueError("LAKEHOUSE_NAME must be set! Please provide a valid lakehouse name (alphanumeric and underscores only).")
-    
-if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: '{LAKEHOUSE_NAME}'. Must contain only alphanumeric characters and underscores.")
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -95,7 +168,7 @@ log("="*80)
 CATALOG = spark.sql("SELECT current_catalog()").first()[0]
 log(f"Using catalog: {CATALOG}")
 
-schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
 log(f"Ensuring lakehouse schema exists: {schema_name}")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -163,17 +236,123 @@ def serialize_json(obj):
     return ""
 
 # ==============================================================  
+# PARALLEL API HELPERS FOR PERFORMANCE
+# ==============================================================
+# These helpers enable parallel fetching of dataset/dataflow details
+# which significantly reduces total extraction time.
+
+# Use the configured parallel worker setting
+MAX_WORKERS = MAX_PARALLEL_WORKERS
+
+def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
+    """Fetch dataset sources and refresh history in parallel"""
+    sources = []
+    refreshes = []
+    errors = []
+    
+    # Fetch dataset sources
+    try:
+        datasources_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/datasources"
+        response = client.get(datasources_url)
+        if response.status_code == 200:
+            for datasource in response.json().get('value', []):
+                sources.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DatasetId": dataset_id,
+                    "DatasetName": dataset_name,
+                    "DatasetDatasourceType": datasource.get("datasourceType", ""),
+                    "DatasetDatasourceId": datasource.get("datasourceId", ""),
+                    "DatasetDatasourceGatewayId": datasource.get("gatewayId", ""),
+                    "DatasetDatasourceConnectionDetails": serialize_json(datasource.get("connectionDetails"))
+                })
+    except Exception as e:
+        errors.append(f"datasources: {e}")
+    
+    # Fetch dataset refresh history
+    try:
+        refresh_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshes"
+        response = client.get(refresh_url)
+        if response.status_code == 200:
+            for refresh in response.json().get('value', []):
+                refreshes.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DatasetId": dataset_id,
+                    "DatasetName": dataset_name,
+                    "DatasetRefreshRequestId": refresh.get("requestId", ""),
+                    "DatasetRefreshId": refresh.get("id", ""),
+                    "DatasetRefreshStartTime": refresh.get("startTime", ""),
+                    "DatasetRefreshEndTime": refresh.get("endTime", ""),
+                    "DatasetRefreshStatus": refresh.get("status", ""),
+                    "DatasetRefreshType": refresh.get("refreshType", "")
+                })
+    except Exception as e:
+        errors.append(f"refresh history: {e}")
+    
+    return sources, refreshes, errors
+
+def fetch_dataflow_details(client, ws_id, ws_name, dataflow_id, dataflow_name):
+    """Fetch dataflow sources and refresh history in parallel"""
+    sources = []
+    refreshes = []
+    errors = []
+    
+    # Fetch dataflow sources
+    try:
+        sources_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/datasources"
+        response = client.get(sources_url)
+        if response.status_code == 200:
+            for source in response.json().get('value', []):
+                sources.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DataflowId": dataflow_id,
+                    "DataflowName": dataflow_name,
+                    "DataflowDatasourceType": source.get("datasourceType", ""),
+                    "DataflowDatasourceId": source.get("datasourceId", ""),
+                    "DataflowDatasourceGatewayId": source.get("gatewayId", ""),
+                    "DataflowDatasourceConnectionDetails": serialize_json(source.get("connectionDetails"))
+                })
+    except Exception as e:
+        errors.append(f"datasources: {e}")
+    
+    # Fetch dataflow refresh history (transactions)
+    try:
+        refresh_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/transactions"
+        response = client.get(refresh_url)
+        if response.status_code == 200:
+            for refresh in response.json().get('value', []):
+                refreshes.append({
+                    "WorkspaceId": ws_id,
+                    "WorkspaceName": ws_name,
+                    "DataflowId": dataflow_id,
+                    "DataflowName": dataflow_name,
+                    "DataflowRefreshRequestId": refresh.get("requestId", ""),
+                    "DataflowRefreshId": refresh.get("id", ""),
+                    "DataflowRefreshStartTime": refresh.get("startTime", ""),
+                    "DataflowRefreshEndTime": refresh.get("endTime", ""),
+                    "DataflowRefreshStatus": refresh.get("status", ""),
+                    "DataflowRefreshType": refresh.get("refreshType", ""),
+                    "DataflowErrorInfo": serialize_json(refresh.get("errorInfo"))
+                })
+    except Exception as e:
+        errors.append(f"refresh history: {e}")
+    
+    return sources, refreshes, errors
+
+# ==============================================================  
 # GET WORKSPACES
 # ==============================================================
 
 log("Fetching workspaces...")
 workspaces_df = fabric.list_workspaces()
 
-if SINGLE_WORKSPACE_NAME:
-    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
     if workspaces_df.empty:
-        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
-    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
 
 log(f"Workspace count: {len(workspaces_df)}")
 
@@ -201,7 +380,7 @@ for ws_info in workspaces_info:
     
     log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
 
-    # -------------------- DATASETS --------------------
+    # -------------------- DATASETS (with parallel detail fetching) --------------------
     try:
         log(f"  Fetching datasets...")
         datasets_df = fabric.list_datasets(workspace=ws_name)
@@ -209,6 +388,8 @@ for ws_info in workspaces_info:
         if datasets_df is not None and not datasets_df.empty:
             log(f"  Datasets found: {len(datasets_df)}")
             
+            # Collect dataset basic info first
+            dataset_tasks = []
             for _, ds_row in datasets_df.iterrows():
                 dataset_id = safe_get(ds_row, "Dataset ID")
                 dataset_name = safe_get(ds_row, "Dataset Name")
@@ -229,56 +410,34 @@ for ws_info in workspaces_info:
                     "DatasetCreatedDate": safe_get(ds_row, "Created Date")
                 })
                 
-                # Fetch dataset sources using REST API
-                try:
-                    datasources_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/datasources"
-                    response = client.get(datasources_url)
-                    
-                    if response.status_code == 200:
-                        datasources = response.json().get('value', [])
-                        for datasource in datasources:
-                            dataset_sources_info.append({
-                                "WorkspaceId": ws_id,
-                                "WorkspaceName": ws_name,
-                                "DatasetId": dataset_id,
-                                "DatasetName": dataset_name,
-                                "DatasetDatasourceType": datasource.get("datasourceType", ""),
-                                "DatasetDatasourceId": datasource.get("datasourceId", ""),
-                                "DatasetDatasourceGatewayId": datasource.get("gatewayId", ""),
-                                "DatasetDatasourceConnectionDetails": serialize_json(datasource.get("connectionDetails"))
-                            })
-                except Exception as e:
-                    log(f"    Could not fetch dataset sources for {dataset_name}: {e}")
-                
-                # Fetch dataset refresh history
-                try:
-                    refresh_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshes"
-                    response = client.get(refresh_url)
-                    
-                    if response.status_code == 200:
-                        refreshes = response.json().get('value', [])
-                        for refresh in refreshes:
-                            dataset_refresh_history.append({
-                                "WorkspaceId": ws_id,
-                                "WorkspaceName": ws_name,
-                                "DatasetId": dataset_id,
-                                "DatasetName": dataset_name,
-                                "DatasetRefreshRequestId": refresh.get("requestId", ""),
-                                "DatasetRefreshId": refresh.get("id", ""),
-                                "DatasetRefreshStartTime": refresh.get("startTime", ""),
-                                "DatasetRefreshEndTime": refresh.get("endTime", ""),
-                                "DatasetRefreshStatus": refresh.get("status", ""),
-                                "DatasetRefreshType": refresh.get("refreshType", "")
-                            })
-                except Exception as e:
-                    log(f"    Could not fetch refresh history for {dataset_name}: {e}")
+                dataset_tasks.append((dataset_id, dataset_name))
+            
+            # Fetch dataset details in parallel
+            log(f"  Fetching dataset details in parallel (max {MAX_WORKERS} workers)...")
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(fetch_dataset_details, client, ws_id, ws_name, ds_id, ds_name): (ds_id, ds_name)
+                    for ds_id, ds_name in dataset_tasks
+                }
+                for future in as_completed(futures):
+                    try:
+                        sources, refreshes, errors = future.result()
+                        dataset_sources_info.extend(sources)
+                        dataset_refresh_history.extend(refreshes)
+                        if errors:
+                            ds_id, ds_name = futures[future]
+                            for err in errors:
+                                log(f"    Warning ({ds_name}): {err}")
+                    except Exception as e:
+                        ds_id, ds_name = futures[future]
+                        log(f"    Error fetching details for {ds_name}: {e}")
         else:
             log(f"  No datasets found")
             
     except Exception as e:
         log(f"  ERROR fetching datasets: {e}")
 
-    # -------------------- DATAFLOWS --------------------
+    # -------------------- DATAFLOWS (with parallel detail fetching) --------------------
     try:
         log(f"  Fetching dataflows...")
         dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
@@ -288,6 +447,8 @@ for ws_info in workspaces_info:
             dataflows = response.json().get('value', [])
             log(f"  Dataflows found: {len(dataflows)}")
             
+            # Collect dataflow basic info first
+            dataflow_tasks = []
             for dataflow in dataflows:
                 dataflow_id = dataflow.get("objectId", "")
                 dataflow_name = dataflow.get("name", "")
@@ -309,50 +470,28 @@ for ws_info in workspaces_info:
                     "DataflowGeneration": dataflow.get("generation", "")
                 })
                 
-                # Fetch dataflow sources
-                try:
-                    dataflow_sources_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/datasources"
-                    sources_response = client.get(dataflow_sources_url)
-                    
-                    if sources_response.status_code == 200:
-                        sources = sources_response.json().get('value', [])
-                        for source in sources:
-                            dataflow_sources_info.append({
-                                "WorkspaceId": ws_id,
-                                "WorkspaceName": ws_name,
-                                "DataflowId": dataflow_id,
-                                "DataflowName": dataflow_name,
-                                "DataflowDatasourceType": source.get("datasourceType", ""),
-                                "DataflowDatasourceId": source.get("datasourceId", ""),
-                                "DataflowDatasourceGatewayId": source.get("gatewayId", ""),
-                                "DataflowDatasourceConnectionDetails": serialize_json(source.get("connectionDetails"))
-                            })
-                except Exception as e:
-                    log(f"    Could not fetch dataflow sources for {dataflow_name}: {e}")
-                
-                # Fetch dataflow refresh history (transactions)
-                try:
-                    refresh_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/transactions"
-                    refresh_response = client.get(refresh_url)
-                    
-                    if refresh_response.status_code == 200:
-                        refreshes = refresh_response.json().get('value', [])
-                        for refresh in refreshes:
-                            dataflow_refresh_history.append({
-                                "WorkspaceId": ws_id,
-                                "WorkspaceName": ws_name,
-                                "DataflowId": dataflow_id,
-                                "DataflowName": dataflow_name,
-                                "DataflowRefreshRequestId": refresh.get("requestId", ""),
-                                "DataflowRefreshId": refresh.get("id", ""),
-                                "DataflowRefreshStartTime": refresh.get("startTime", ""),
-                                "DataflowRefreshEndTime": refresh.get("endTime", ""),
-                                "DataflowRefreshStatus": refresh.get("status", ""),
-                                "DataflowRefreshType": refresh.get("refreshType", ""),
-                                "DataflowErrorInfo": serialize_json(refresh.get("errorInfo"))
-                            })
-                except Exception as e:
-                    log(f"    Could not fetch refresh history for {dataflow_name}: {e}")
+                dataflow_tasks.append((dataflow_id, dataflow_name))
+            
+            # Fetch dataflow details in parallel
+            if dataflow_tasks:
+                log(f"  Fetching dataflow details in parallel (max {MAX_WORKERS} workers)...")
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    futures = {
+                        executor.submit(fetch_dataflow_details, client, ws_id, ws_name, df_id, df_name): (df_id, df_name)
+                        for df_id, df_name in dataflow_tasks
+                    }
+                    for future in as_completed(futures):
+                        try:
+                            sources, refreshes, errors = future.result()
+                            dataflow_sources_info.extend(sources)
+                            dataflow_refresh_history.extend(refreshes)
+                            if errors:
+                                df_id, df_name = futures[future]
+                                for err in errors:
+                                    log(f"    Warning ({df_name}): {err}")
+                        except Exception as e:
+                            df_id, df_name = futures[future]
+                            log(f"    Error fetching details for {df_name}: {e}")
         else:
             log(f"  No dataflows found")
     except Exception as e:
@@ -556,7 +695,7 @@ log("Writing output to Lakehouse")
 log("="*80)
 
 def write_table(data, name, sample_row=None):
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     if not data:
         # Create empty table using sample row structure if provided
@@ -623,20 +762,13 @@ log("="*80)
 
 import time, re, pandas as pd
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
 from sempy_labs.report import ReportWrapper
 # Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
 from sempy_labs._helper_functions import resolve_dataset_from_report
 
-# -----------------------------------
-# CONFIG
-# -----------------------------------
-LAKEHOUSE_NAME = "dbo"         # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
-
-# Validate lakehouse name
-if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES, MAX_PARALLEL_WORKERS
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -675,7 +807,7 @@ log("="*80)
 CATALOG = spark.sql("SELECT current_catalog()").first()[0]
 log(f"Using catalog: {CATALOG}")
 
-schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
 log(f"Ensuring lakehouse schema exists: {schema_name}")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -702,22 +834,259 @@ all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "
 all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
 
 # ==============================================================  
+# PARALLEL REPORT EXTRACTION HELPER
+# ==============================================================
+
+def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
+    """Extract metadata for a single report using ReportWrapper"""
+    result = {
+        'connections': [],
+        'pages': [],
+        'visuals': [],
+        'bookmarks': [],
+        'custom_visuals': [],
+        'report_filters': [],
+        'page_filters': [],
+        'visual_filters': [],
+        'visual_objects': [],
+        'report_level_measures': [],
+        'visual_interactions': [],
+        'error': None
+    }
+    
+    try:
+        rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
+        
+        # Add connection record
+        result['connections'].append({
+            "ReportID": rpt_id,
+            "ModelID": model_id,
+            "ReportDate": report_date,
+            "ReportName": rpt_name,
+            "Type": "",
+            "ServerName": "",
+            "WorkspaceName": ws_name
+        })
+        
+        # Pages
+        df = rpt.list_pages()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['pages'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Id": row.get("Page Name", ""),
+                    "Name": row.get("Page Display Name", ""),
+                    "Number": 0,
+                    "Width": row.get("Width", 0),
+                    "Height": row.get("Height", 0),
+                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "VisualCount": row.get("Visual Count", 0),
+                    "Type": row.get("Display Option", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visuals
+        df = rpt.list_visuals()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visuals'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "Id": row.get("Visual Name", ""),
+                    "Name": row.get("Visual Name", ""),
+                    "Type": row.get("Type", ""),
+                    "CustomVisualFlag": bool(row.get("Custom Visual", False)),
+                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "X": row.get("X", 0),
+                    "Y": row.get("Y", 0),
+                    "Z": row.get("Z", 0),
+                    "Width": row.get("Width", 0),
+                    "Height": row.get("Height", 0),
+                    "ObjectCount": row.get("Visual Object Count", 0),
+                    "ParentGroup": "",
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Bookmarks
+        df = rpt.list_bookmarks()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['bookmarks'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Name": row.get("Bookmark Display Name", ""),
+                    "Id": row.get("Bookmark Name", ""),
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Custom Visuals
+        df = rpt.list_custom_visuals()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['custom_visuals'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Name": row.get("Custom Visual Display Name", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Report Filters
+        df = rpt.list_report_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['report_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "displayName": row.get("Filter Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Page Filters
+        df = rpt.list_page_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['page_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageId": row.get("Page Name", ""),
+                    "PageName": row.get("Page Display Name", ""),
+                    "displayName": row.get("Filter Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Filters
+        df = rpt.list_visual_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "displayName": row.get("Filter Name", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Objects
+        df = rpt.list_visual_objects()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_objects'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "VisualType": "",
+                    "CustomVisualFlag": False,
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "Source": "",
+                    "displayName": row.get("Object Display Name", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Report-Level Measures
+        df = rpt.list_report_level_measures()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['report_level_measures'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Measure Name", ""),
+                    "ObjectType": "Measure",
+                    "Expression": row.get("Expression", ""),
+                    "HiddenFlag": "False",
+                    "FormatString": row.get("Format String", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Interactions
+        df = rpt.list_visual_interactions()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_interactions'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "SourceVisualID": row.get("Source Visual Name", ""),
+                    "TargetVisualID": row.get("Target Visual Name", ""),
+                    "TypeID": "",
+                    "Type": row.get("Type", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+    
+    except Exception as e:
+        result['error'] = str(e)
+    
+    return result
+
+# ==============================================================  
 # GET WORKSPACES
 # ==============================================================
 
 workspaces_df = fabric.list_workspaces()
 
-if SINGLE_WORKSPACE_NAME:
-    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
     if workspaces_df.empty:
-        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
-    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
 
 log(f"Workspace count: {len(workspaces_df)}")
 log("")
 
 # ==============================================================  
-# REPORT METADATA EXTRACTION
+# REPORT METADATA EXTRACTION (with parallel processing)
 # ==============================================================
 
 for ws_row in workspaces_df.itertuples(index=False):
@@ -731,8 +1100,10 @@ for ws_row in workspaces_df.itertuples(index=False):
             continue
 
         log(f"  Reports found: {len(reports_df)}")
-
-        for idx, rpt_row in enumerate(reports_df.itertuples(index=False), start=1):
+        
+        # Prepare report tasks
+        report_tasks = []
+        for rpt_row in reports_df.itertuples(index=False):
             rpt_name = rpt_row.Name
             rpt_id = rpt_row.Id
             
@@ -743,245 +1114,55 @@ for ws_row in workspaces_df.itertuples(index=False):
             
             if not model_id:
                 try:
-                    # resolve_dataset_from_report returns: (dataset_id, dataset_name, workspace_id, workspace_name)
                     dataset_id, _, _, _ = resolve_dataset_from_report(
                         report=rpt_id, workspace=ws_name
                     )
                     model_id = str(dataset_id) if dataset_id is not None else ""
-                except Exception as e:
-                    log(f"    Warning: Could not resolve dataset ID: {e}")
+                except Exception:
                     model_id = ""
-
-            # -------------------- Connections --------------------
-            # Add connection record (one per report)
-            all_connections.append({
-                "ReportID": rpt_id,
-                "ModelID": model_id,
-                "ReportDate": REPORT_DATE,
-                "ReportName": rpt_name,
-                "Type": "",
-                "ServerName": "",
-                "WorkspaceName": ws_name
-            })
-
-            t0 = time.time()
-            log(f"\n  [{idx}/{len(reports_df)}] Extracting report: {rpt_name}")
-
-            try:
-                rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
-
-                # -------------------- Pages --------------------
-                df = rpt.list_pages()
-                log(f"    Pages: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_pages.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "Id": row.get("Page Name", ""),
-                            "Name": row.get("Page Display Name", ""),
-                            "Number": 0,  # Note: Page number not available in list_pages() output
-                            "Width": row.get("Width", 0),
-                            "Height": row.get("Height", 0),
-                            "HiddenFlag": bool(row.get("Hidden", False)),
-                            "VisualCount": row.get("Visual Count", 0),
-                            "Type": row.get("Display Option", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Visuals --------------------
-                df = rpt.list_visuals()
-                log(f"    Visuals: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_visuals.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "PageName": row.get("Page Display Name", ""),
-                            "PageId": row.get("Page Name", ""),
-                            "Id": row.get("Visual Name", ""),
-                            "Name": row.get("Visual Name", ""),
-                            "Type": row.get("Type", ""),
-                            "CustomVisualFlag": bool(row.get("Custom Visual", False)),
-                            "HiddenFlag": bool(row.get("Hidden", False)),
-                            "X": row.get("X", 0),
-                            "Y": row.get("Y", 0),
-                            "Z": row.get("Z", 0),
-                            "Width": row.get("Width", 0),
-                            "Height": row.get("Height", 0),
-                            "ObjectCount": row.get("Visual Object Count", 0),
-                            "ParentGroup": "",  # Note: Parent group not available in list_visuals() output
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Bookmarks --------------------
-                df = rpt.list_bookmarks()
-                log(f"    Bookmarks: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_bookmarks.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "Name": row.get("Bookmark Display Name", ""),
-                            "Id": row.get("Bookmark Name", ""),
-                            "PageName": row.get("Page Display Name", ""),
-                            "PageId": row.get("Page Name", ""),
-                            "VisualId": row.get("Visual Name", ""),
-                            "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Custom Visuals --------------------
-                df = rpt.list_custom_visuals()
-                log(f"    Custom Visuals: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_custom_visuals.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "Name": row.get("Custom Visual Display Name", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Report Filters --------------------
-                df = rpt.list_report_filters()
-                log(f"    Report Filters: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_report_filters.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "displayName": row.get("Filter Name", ""),
-                            "TableName": row.get("Table Name", ""),
-                            "ObjectName": row.get("Object Name", ""),
-                            "ObjectType": row.get("Object Type", ""),
-                            "FilterType": row.get("Type", ""),
-                            "HiddenFilter": str(bool(row.get("Hidden", False))),
-                            "LockedFilter": str(bool(row.get("Locked", False))),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Page Filters --------------------
-                df = rpt.list_page_filters()
-                log(f"    Page Filters: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_page_filters.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "PageId": row.get("Page Name", ""),
-                            "PageName": row.get("Page Display Name", ""),
-                            "displayName": row.get("Filter Name", ""),
-                            "TableName": row.get("Table Name", ""),
-                            "ObjectName": row.get("Object Name", ""),
-                            "ObjectType": row.get("Object Type", ""),
-                            "FilterType": row.get("Type", ""),
-                            "HiddenFilter": str(bool(row.get("Hidden", False))),
-                            "LockedFilter": str(bool(row.get("Locked", False))),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Visual Filters --------------------
-                df = rpt.list_visual_filters()
-                log(f"    Visual Filters: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_visual_filters.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "PageName": row.get("Page Display Name", ""),
-                            "PageId": row.get("Page Name", ""),
-                            "VisualId": row.get("Visual Name", ""),
-                            "TableName": row.get("Table Name", ""),
-                            "ObjectName": row.get("Object Name", ""),
-                            "ObjectType": row.get("Object Type", ""),
-                            "FilterType": row.get("Type", ""),
-                            "HiddenFilter": str(bool(row.get("Hidden", False))),
-                            "LockedFilter": str(bool(row.get("Locked", False))),
-                            "displayName": row.get("Filter Name", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Visual Objects --------------------
-                df = rpt.list_visual_objects()
-                log(f"    Visual Objects: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_visual_objects.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "PageName": row.get("Page Display Name", ""),
-                            "PageId": row.get("Page Name", ""),
-                            "VisualId": row.get("Visual Name", ""),
-                            "VisualType": "",  # Note: Visual type not available in list_visual_objects() - join with Visuals table if needed
-                            "CustomVisualFlag": False,  # Note: Custom visual flag not available in list_visual_objects() - join with Visuals table if needed
-                            "TableName": row.get("Table Name", ""),
-                            "ObjectName": row.get("Object Name", ""),
-                            "ObjectType": row.get("Object Type", ""),
-                            "Source": "",  # Note: Source not available in list_visual_objects() output
-                            "displayName": row.get("Object Display Name", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Report-Level Measures --------------------
-                df = rpt.list_report_level_measures()
-                log(f"    Report-Level Measures: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_report_level_measures.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "TableName": row.get("Table Name", ""),
-                            "ObjectName": row.get("Measure Name", ""),
-                            "ObjectType": "Measure",
-                            "Expression": row.get("Expression", ""),
-                            "HiddenFlag": "False",  # Note: Hidden flag not available in list_report_level_measures() - report-level measures are typically visible
-                            "FormatString": row.get("Format String", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-                # -------------------- Visual Interactions --------------------
-                df = rpt.list_visual_interactions()
-                log(f"    Visual Interactions: {0 if df is None else len(df)}")
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    for _, row in df.iterrows():
-                        all_visual_interactions.append({
-                            "ReportName": rpt_name,
-                            "ReportID": rpt_id,
-                            "ModelID": model_id,
-                            "PageName": row.get("Page Display Name", ""),
-                            "PageId": row.get("Page Name", ""),
-                            "SourceVisualID": row.get("Source Visual Name", ""),
-                            "TargetVisualID": row.get("Target Visual Name", ""),
-                            "TypeID": "",  # Note: TypeID not available from semantic-link-labs
-                            "Type": row.get("Type", ""),
-                            "ReportDate": REPORT_DATE,
-                            "WorkspaceName": ws_name
-                        })
-
-            except Exception as e:
-                log(f"    ERROR extracting {rpt_name}: {e}")
-
-            log(f"  → Finished {rpt_name} in {time.time() - t0:.1f} sec "
-                f"(Total: {elapsed_min():.2f} min)")
+            
+            report_tasks.append((rpt_name, rpt_id, model_id))
+        
+        # Process reports in parallel
+        log(f"  Extracting reports in parallel (max {MAX_PARALLEL_WORKERS} workers)...")
+        
+        # Collect results first (thread-safe)
+        report_results = []
+        
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL_WORKERS) as executor:
+            futures = {
+                executor.submit(extract_report_metadata, ws_name, rpt_name, rpt_id, model_id, REPORT_DATE): rpt_name
+                for rpt_name, rpt_id, model_id in report_tasks
+            }
+            
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                rpt_name = futures[future]
+                try:
+                    result = future.result()
+                    
+                    if result['error']:
+                        log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {result['error']}")
+                    else:
+                        report_results.append(result)
+                        log(f"  [{completed}/{len(report_tasks)}] ✓ Extracted {rpt_name}")
+                except Exception as e:
+                    log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {e}")
+        
+        # Aggregate all results after parallel processing completes (thread-safe)
+        for result in report_results:
+            all_connections.extend(result['connections'])
+            all_pages.extend(result['pages'])
+            all_visuals.extend(result['visuals'])
+            all_bookmarks.extend(result['bookmarks'])
+            all_custom_visuals.extend(result['custom_visuals'])
+            all_report_filters.extend(result['report_filters'])
+            all_page_filters.extend(result['page_filters'])
+            all_visual_filters.extend(result['visual_filters'])
+            all_visual_objects.extend(result['visual_objects'])
+            all_report_level_measures.extend(result['report_level_measures'])
+            all_visual_interactions.extend(result['visual_interactions'])
 
     except Exception as e:
         log(f"ERROR accessing workspace {ws_name}: {e}")
@@ -1003,7 +1184,7 @@ def write_table(data, name):
         data: List of dictionaries containing the data (first row is schema template)
         name: Name of the table
     """
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -1064,19 +1245,12 @@ log("="*80)
 
 import time, re, pandas as pd
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
 from sempy_labs.tom import TOMWrapper
 from sempy_labs._model_dependencies import get_model_calc_dependencies
 
-# -----------------------------------
-# CONFIG
-# -----------------------------------
-LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
-
-# Validate lakehouse name
-if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES, MAX_PARALLEL_WORKERS
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -1115,7 +1289,7 @@ log("="*80)
 CATALOG = spark.sql("SELECT current_catalog()").first()[0]
 log(f"Using catalog: {CATALOG}")
 
-schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
 log(f"Ensuring lakehouse schema exists: {schema_name}")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -1201,11 +1375,11 @@ def get_dependency_name(dep_obj):
 
 workspaces_df = fabric.list_workspaces()
 
-if SINGLE_WORKSPACE_NAME:
-    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
     if workspaces_df.empty:
-        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
-    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
 
 log(f"Workspace count: {len(workspaces_df)}")
 log("")
@@ -1625,7 +1799,7 @@ def write_table(data, name):
         data: List of dictionaries containing the data (first row is schema template)
         name: Name of the table
     """
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -1696,15 +1870,7 @@ from datetime import datetime
 import sempy.fabric as fabric
 from sempy.fabric import FabricRestClient
 
-# -----------------------------------
-# CONFIG
-# -----------------------------------
-LAKEHOUSE_NAME = "dbo"          # <-- CHANGE THIS
-SINGLE_WORKSPACE_NAME = None   # <-- or set to None to scan all
-
-# Validate lakehouse name
-if not re.match(r'^[a-zA-Z0-9_]+$', LAKEHOUSE_NAME):
-    raise ValueError(f"Invalid lakehouse name: {LAKEHOUSE_NAME}")
+# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES
 
 EXTRACTION_TIMESTAMP = datetime.now()
 REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
@@ -1743,7 +1909,7 @@ log("="*80)
 CATALOG = spark.sql("SELECT current_catalog()").first()[0]
 log(f"Using catalog: {CATALOG}")
 
-schema_name = f"{CATALOG}.{LAKEHOUSE_NAME}"
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
 log(f"Ensuring lakehouse schema exists: {schema_name}")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -1961,11 +2127,11 @@ def extract_gen1_dataflow(client, workspace_id, dataflow_id, dataflow_name, work
 
 workspaces_df = fabric.list_workspaces()
 
-if SINGLE_WORKSPACE_NAME:
-    workspaces_df = workspaces_df[workspaces_df["Name"] == SINGLE_WORKSPACE_NAME]
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
     if workspaces_df.empty:
-        raise ValueError(f"Workspace '{SINGLE_WORKSPACE_NAME}' not found.")
-    log(f"Filtering to workspace: {SINGLE_WORKSPACE_NAME}")
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
 
 log(f"Workspace count: {len(workspaces_df)}")
 log("")
@@ -2073,7 +2239,7 @@ def write_table(data, name):
         data: List of dictionaries containing the data (first row is schema template)
         name: Name of the table
     """
-    full_name = f"{CATALOG}.{LAKEHOUSE_NAME}.{name}"
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -2110,4 +2276,3 @@ log("PROCESS COMPLETE")
 log(f"Finished at: {datetime.now()}")
 log(f"Total runtime: {elapsed_min():.2f} minutes")
 log("="*80)
-
