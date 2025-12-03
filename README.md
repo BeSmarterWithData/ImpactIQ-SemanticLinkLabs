@@ -1,4 +1,4 @@
-# Power BI Governance Solution - Setup Guide
+# Power BI & Fabric Governance Solution - Setup Guide
 
 This repository contains a comprehensive Power BI governance solution that extracts metadata from your Power BI environment using Microsoft Fabric and semantic-link-labs.
 
