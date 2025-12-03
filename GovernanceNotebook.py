@@ -822,16 +822,16 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # This ensures empty tables can be created with correct column structure.
 
 all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""}]
-all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "ReportDate": "", "WorkspaceName": ""}]
-all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
-all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "ReportDate": "", "WorkspaceName": ""}]
+all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""}]
+all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": False, "RowSubTotals": False, "ColumnSubTotals": False, "DataVisual": False, "HasSparkline": False, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
+all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "SuppressData": False, "CurrentPageSelected": False, "ApplyVisualDisplayState": False, "ApplyToAllVisuals": False, "ReportDate": "", "WorkspaceName": ""}]
 all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": "", "WorkspaceName": ""}]
-all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": "", "WorkspaceName": ""}]
-all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "ReportDate": "", "WorkspaceName": ""}]
-all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "ReportDate": "", "WorkspaceName": ""}]
-all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ReportDate": "", "WorkspaceName": ""}]
-all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "ReportDate": "", "WorkspaceName": ""}]
-all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": False, "Sparkline": False, "VisualCalc": False, "Format": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
 
 # ==============================================================  
 # PARALLEL REPORT EXTRACTION HELPER
@@ -884,6 +884,10 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "HiddenFlag": bool(row.get("Hidden", False)),
                     "VisualCount": row.get("Visual Count", 0),
                     "Type": row.get("Display Option", ""),
+                    "DisplayOption": row.get("Display Option", ""),
+                    "DataVisualCount": row.get("Data Visual Count", 0),
+                    "VisibleVisualCount": row.get("Visible Visual Count", 0),
+                    "PageFilterCount": row.get("Page Filter Count", 0),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -901,6 +905,11 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "Id": row.get("Visual Name", ""),
                     "Name": row.get("Visual Name", ""),
                     "Type": row.get("Type", ""),
+                    "DisplayType": row.get("Display Type", ""),
+                    "Title": row.get("Title", ""),
+                    "SubTitle": row.get("Sub Title", ""),
+                    "AltText": row.get("Alt Text", ""),
+                    "TabOrder": row.get("Tab Order", 0),
                     "CustomVisualFlag": bool(row.get("Custom Visual", False)),
                     "HiddenFlag": bool(row.get("Hidden", False)),
                     "X": row.get("X", 0),
@@ -909,6 +918,13 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "Width": row.get("Width", 0),
                     "Height": row.get("Height", 0),
                     "ObjectCount": row.get("Visual Object Count", 0),
+                    "VisualFilterCount": row.get("Visual Filter Count", 0),
+                    "DataLimit": row.get("Data Limit", 0),
+                    "Divider": bool(row.get("Divider", False)),
+                    "RowSubTotals": bool(row.get("Row Sub Totals", False)),
+                    "ColumnSubTotals": bool(row.get("Column Sub Totals", False)),
+                    "DataVisual": bool(row.get("Data Visual", False)),
+                    "HasSparkline": bool(row.get("Has Sparkline", False)),
                     "ParentGroup": "",
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
@@ -928,6 +944,10 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "PageId": row.get("Page Name", ""),
                     "VisualId": row.get("Visual Name", ""),
                     "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
+                    "SuppressData": bool(row.get("Suppress Data", False)),
+                    "CurrentPageSelected": bool(row.get("Current Page Selected", False)),
+                    "ApplyVisualDisplayState": bool(row.get("Apply Visual Display State", False)),
+                    "ApplyToAllVisuals": bool(row.get("Apply To All Visuals", False)),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -960,6 +980,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "FilterType": row.get("Type", ""),
                     "HiddenFilter": str(bool(row.get("Hidden", False))),
                     "LockedFilter": str(bool(row.get("Locked", False))),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -981,6 +1003,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "FilterType": row.get("Type", ""),
                     "HiddenFilter": str(bool(row.get("Hidden", False))),
                     "LockedFilter": str(bool(row.get("Locked", False))),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1003,6 +1027,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "HiddenFilter": str(bool(row.get("Hidden", False))),
                     "LockedFilter": str(bool(row.get("Locked", False))),
                     "displayName": row.get("Filter Name", ""),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1018,6 +1044,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "PageName": row.get("Page Display Name", ""),
                     "PageId": row.get("Page Name", ""),
                     "VisualId": row.get("Visual Name", ""),
+                    "VisualName": row.get("Visual Name", ""),
                     "VisualType": "",
                     "CustomVisualFlag": False,
                     "TableName": row.get("Table Name", ""),
@@ -1025,6 +1052,10 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "ObjectType": row.get("Object Type", ""),
                     "Source": "",
                     "displayName": row.get("Object Display Name", ""),
+                    "ImplicitMeasure": bool(row.get("Implicit Measure", False)),
+                    "Sparkline": bool(row.get("Sparkline", False)),
+                    "VisualCalc": bool(row.get("Visual Calc", False)),
+                    "Format": row.get("Format", ""),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1043,6 +1074,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "Expression": row.get("Expression", ""),
                     "HiddenFlag": "False",
                     "FormatString": row.get("Format String", ""),
+                    "DataType": row.get("Data Type", ""),
+                    "DataCategory": row.get("Data Category", ""),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1059,6 +1092,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "PageId": row.get("Page Name", ""),
                     "SourceVisualID": row.get("Source Visual Name", ""),
                     "TargetVisualID": row.get("Target Visual Name", ""),
+                    "SourceVisualName": row.get("Source Visual Name", ""),
+                    "TargetVisualName": row.get("Target Visual Name", ""),
                     "TypeID": "",
                     "Type": row.get("Type", ""),
                     "ReportDate": report_date,
