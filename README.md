@@ -272,10 +272,12 @@ To scan all workspaces (default):
 WORKSPACE_NAMES = ["All"]
 ```
 
-To scan specific workspaces:
+To scan specific workspaces (maximum 10):
 ```python
 WORKSPACE_NAMES = ["Marketing", "Finance", "Sales"]
 ```
+
+**Note**: You can specify up to 10 workspaces. If you need to scan more, use `["All"]` or run the notebook multiple times with different workspace lists.
 
 ### Schema Name
 
