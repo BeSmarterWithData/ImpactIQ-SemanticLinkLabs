@@ -1445,8 +1445,17 @@ for ws_row in workspaces_df.itertuples(index=False):
 
             try:
                 tom = TOMWrapper(dataset=model_name, workspace=ws_name, readonly=True)
+            except Exception as e:
+                log(f"    ERROR opening model {model_name}: {e}")
+                continue
 
-                # -------------------- Tables --------------------
+            # Initialize variables that may be used later in dependencies
+            measures = []
+            calc_columns = []
+            calc_items = []
+
+            # -------------------- Tables --------------------
+            try:
                 tables = tom.model.Tables
                 log(f"    Tables: {len(tables)}")
                 for t in tables:
@@ -1480,8 +1489,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Tables: {e}")
 
-                # -------------------- Calculation Groups --------------------
+            # -------------------- Calculation Groups --------------------
+            try:
                 calc_groups = list(tom.all_calculation_groups())
                 log(f"    Calculation Groups: {len(calc_groups)}")
                 for cg in calc_groups:
@@ -1508,8 +1520,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Calculation Groups: {e}")
 
-                # -------------------- Calculation Items --------------------
+            # -------------------- Calculation Items --------------------
+            try:
                 calc_items = list(tom.all_calculation_items())
                 log(f"    Calculation Items: {len(calc_items)}")
                 for ci in calc_items:
@@ -1536,8 +1551,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Calculation Items: {e}")
 
-                # -------------------- Columns --------------------
+            # -------------------- Columns --------------------
+            try:
                 columns = list(tom.all_columns())
                 log(f"    Columns: {len(columns)}")
                 for col in columns:
@@ -1564,8 +1582,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Columns: {e}")
 
-                # -------------------- Calculated Columns --------------------
+            # -------------------- Calculated Columns --------------------
+            try:
                 calc_columns = list(tom.all_calculated_columns())
                 log(f"    Calculated Columns: {len(calc_columns)}")
                 for col in calc_columns:
@@ -1592,8 +1613,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Calculated Columns: {e}")
 
-                # -------------------- Measures --------------------
+            # -------------------- Measures --------------------
+            try:
                 measures = list(tom.all_measures())
                 log(f"    Measures: {len(measures)}")
                 for m in measures:
@@ -1620,8 +1644,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Measures: {e}")
 
-                # -------------------- Hierarchies --------------------
+            # -------------------- Hierarchies --------------------
+            try:
                 hierarchies = list(tom.all_hierarchies())
                 log(f"    Hierarchies: {len(hierarchies)}")
                 for h in hierarchies:
@@ -1648,8 +1675,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Hierarchies: {e}")
 
-                # -------------------- Levels --------------------
+            # -------------------- Levels --------------------
+            try:
                 levels = list(tom.all_levels())
                 log(f"    Levels: {len(levels)}")
                 for l in levels:
@@ -1676,8 +1706,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Levels: {e}")
 
-                # -------------------- Partitions --------------------
+            # -------------------- Partitions --------------------
+            try:
                 partitions = list(tom.all_partitions())
                 log(f"    Partitions: {len(partitions)}")
                 for p in partitions:
@@ -1709,8 +1742,11 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+            except Exception as e:
+                log(f"    ERROR extracting Partitions: {e}")
 
-                # -------------------- Relationships --------------------
+            # -------------------- Relationships --------------------
+            try:
                 relationships = tom.model.Relationships
                 log(f"    Relationships: {len(relationships)}")
                 for r in relationships:
@@ -1737,79 +1773,78 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": r.ToCardinality.ToString(),
                         "RelationshipCrossFilteringBehavior": r.CrossFilteringBehavior.ToString()
                     })
-
-                # -------------------- Model Dependencies --------------------
-                # Uses TOMWrapper.depends_on method documented at:
-                # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
-                try:
-                    dependencies_df = get_model_calc_dependencies(
-                        dataset=model_name,
-                        workspace=ws_name
-                    )
-                    
-                    if dependencies_df is not None and not dependencies_df.empty:
-                        dep_count_before = len(all_model_dependencies)
-                        
-                        # Measure Dependencies
-                        for m in measures:
-                            try:
-                                for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
-                                    all_model_dependencies.append({
-                                        "ObjectName": m.Name,
-                                        "ObjectType": "Measure",
-                                        "DependsOn": get_dependency_name(dep_obj),
-                                        "DependsOnType": str(dep_obj.ObjectType),
-                                        "ModelAsOfDate": REPORT_DATE,
-                                        "ModelName": model_name,
-                                        "ModelID": model_id,
-                                        "WorkspaceName": ws_name
-                                    })
-                            except Exception as e:
-                                log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
-
-                        # Calculated Column Dependencies
-                        for col in calc_columns:
-                            try:
-                                for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
-                                    all_model_dependencies.append({
-                                        "ObjectName": col.Name,
-                                        "ObjectType": "CalculatedColumn",
-                                        "DependsOn": get_dependency_name(dep_obj),
-                                        "DependsOnType": str(dep_obj.ObjectType),
-                                        "ModelAsOfDate": REPORT_DATE,
-                                        "ModelName": model_name,
-                                        "ModelID": model_id,
-                                        "WorkspaceName": ws_name
-                                    })
-                            except Exception as e:
-                                log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
-
-                        # Calculation Item Dependencies
-                        for ci in calc_items:
-                            try:
-                                for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
-                                    all_model_dependencies.append({
-                                        "ObjectName": ci.Name,
-                                        "ObjectType": "CalculationItem",
-                                        "DependsOn": get_dependency_name(dep_obj),
-                                        "DependsOnType": str(dep_obj.ObjectType),
-                                        "ModelAsOfDate": REPORT_DATE,
-                                        "ModelName": model_name,
-                                        "ModelID": model_id,
-                                        "WorkspaceName": ws_name
-                                    })
-                            except Exception as e:
-                                log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")
-                        
-                        dep_count = len(all_model_dependencies) - dep_count_before
-                        log(f"    Dependencies extracted: {dep_count}")
-                    else:
-                        log(f"    No dependencies found")
-                except Exception as e:
-                    log(f"    Warning: Could not extract dependencies: {e}")
-
             except Exception as e:
-                log(f"    ERROR extracting {model_name}: {e}")
+                log(f"    ERROR extracting Relationships: {e}")
+
+            # -------------------- Model Dependencies --------------------
+            # Uses TOMWrapper.depends_on method documented at:
+            # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
+            try:
+                dependencies_df = get_model_calc_dependencies(
+                    dataset=model_name,
+                    workspace=ws_name
+                )
+                
+                if dependencies_df is not None and not dependencies_df.empty:
+                    dep_count_before = len(all_model_dependencies)
+                    
+                    # Measure Dependencies
+                    for m in measures:
+                        try:
+                            for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
+                                all_model_dependencies.append({
+                                    "ObjectName": m.Name,
+                                    "ObjectType": "Measure",
+                                    "DependsOn": get_dependency_name(dep_obj),
+                                    "DependsOnType": str(dep_obj.ObjectType),
+                                    "ModelAsOfDate": REPORT_DATE,
+                                    "ModelName": model_name,
+                                    "ModelID": model_id,
+                                    "WorkspaceName": ws_name
+                                })
+                        except Exception as e:
+                            log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
+
+                    # Calculated Column Dependencies
+                    for col in calc_columns:
+                        try:
+                            for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
+                                all_model_dependencies.append({
+                                    "ObjectName": col.Name,
+                                    "ObjectType": "CalculatedColumn",
+                                    "DependsOn": get_dependency_name(dep_obj),
+                                    "DependsOnType": str(dep_obj.ObjectType),
+                                    "ModelAsOfDate": REPORT_DATE,
+                                    "ModelName": model_name,
+                                    "ModelID": model_id,
+                                    "WorkspaceName": ws_name
+                                })
+                        except Exception as e:
+                            log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
+
+                    # Calculation Item Dependencies
+                    for ci in calc_items:
+                        try:
+                            for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
+                                all_model_dependencies.append({
+                                    "ObjectName": ci.Name,
+                                    "ObjectType": "CalculationItem",
+                                    "DependsOn": get_dependency_name(dep_obj),
+                                    "DependsOnType": str(dep_obj.ObjectType),
+                                    "ModelAsOfDate": REPORT_DATE,
+                                    "ModelName": model_name,
+                                    "ModelID": model_id,
+                                    "WorkspaceName": ws_name
+                                })
+                        except Exception as e:
+                            log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")
+                    
+                    dep_count = len(all_model_dependencies) - dep_count_before
+                    log(f"    Dependencies extracted: {dep_count}")
+                else:
+                    log(f"    No dependencies found")
+            except Exception as e:
+                log(f"    Warning: Could not extract dependencies: {e}")
 
             log(f"  → Finished {model_name} in {time.time() - t0:.1f} sec "
                 f"(Total: {elapsed_min():.2f} min)")
