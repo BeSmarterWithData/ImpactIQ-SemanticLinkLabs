@@ -1525,9 +1525,9 @@ for ws_row in workspaces_df.itertuples(index=False):
 
             # -------------------- Calculation Items --------------------
             try:
-                calc_items = list(tom.all_calculation_items())
-                log(f"    Calculation Items: {len(calc_items)}")
-                for ci in calc_items:
+                extracted_calc_items = list(tom.all_calculation_items())
+                log(f"    Calculation Items: {len(extracted_calc_items)}")
+                for ci in extracted_calc_items:
                     all_model_details.append({
                         "Type": "CalculationItem",
                         "Table": ci.CalculationGroup.Name,
@@ -1551,6 +1551,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+                # Only update calc_items if extraction succeeded
+                calc_items = extracted_calc_items
             except Exception as e:
                 log(f"    ERROR extracting Calculation Items: {e}")
 
@@ -1587,9 +1589,9 @@ for ws_row in workspaces_df.itertuples(index=False):
 
             # -------------------- Calculated Columns --------------------
             try:
-                calc_columns = list(tom.all_calculated_columns())
-                log(f"    Calculated Columns: {len(calc_columns)}")
-                for col in calc_columns:
+                extracted_calc_columns = list(tom.all_calculated_columns())
+                log(f"    Calculated Columns: {len(extracted_calc_columns)}")
+                for col in extracted_calc_columns:
                     all_model_details.append({
                         "Type": "CalculatedColumn",
                         "Table": col.Table.Name,
@@ -1613,14 +1615,16 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+                # Only update calc_columns if extraction succeeded
+                calc_columns = extracted_calc_columns
             except Exception as e:
                 log(f"    ERROR extracting Calculated Columns: {e}")
 
             # -------------------- Measures --------------------
             try:
-                measures = list(tom.all_measures())
-                log(f"    Measures: {len(measures)}")
-                for m in measures:
+                extracted_measures = list(tom.all_measures())
+                log(f"    Measures: {len(extracted_measures)}")
+                for m in extracted_measures:
                     all_model_details.append({
                         "Type": "Measure",
                         "Table": m.Table.Name,
@@ -1644,6 +1648,8 @@ for ws_row in workspaces_df.itertuples(index=False):
                         "RelationshipToCardinality": "",
                         "RelationshipCrossFilteringBehavior": ""
                     })
+                # Only update measures if extraction succeeded
+                measures = extracted_measures
             except Exception as e:
                 log(f"    ERROR extracting Measures: {e}")
 
