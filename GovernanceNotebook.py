@@ -4,16 +4,12 @@
 # ## GovernanceNotebook
 # 
 # IMPORTANT: Before running this notebook:
-# 1. use Explorer to the left to "Add data items" and create a New Lakehouse or choose an Existing Lakehouse
-# 2. Set Environment to an environment with Semantic Link Labs pre-installed. 
-# 3. If an environment is not set up, you cannot schedule this notebook in a Pipeline. You must also remove the "#" before "%pip install semantic-link-labs --quiet" in line 16.
+# 1. Use Explorer to the left to "Add data items" and create a New Lakehouse or choose an Existing Lakehouse
 # --------------------------------------------
 # CONFIGURATION - No changes needed by default
 # --------------------------------------------
 LAKEHOUSE_SCHEMA = "dbo"          # <-- =Schema name in your attached Lakehouse - "dbo" is the typical default.
 WORKSPACE_NAMES = ["All"]         # <-- ["All"] to scan and loop through all workspaces, or ["Workspace1", "Workspace2"] for specific workspaces (max 10)
-
-# %pip install semantic-link-labs --quiet
 
 # -----------------------------------
 # PERFORMANCE SETTINGS
