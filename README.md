@@ -19,19 +19,9 @@ a popup will allow you to choose which workspaces you run this against. Select A
 - **Report-Level Measures Inventory** → Surface report-only measures with full DAX and usage details.
 - **New Report Layouts & Wireframe** → See where your visuals sit on the page with a wireframe layout - thanks to @stephbruno for this feature!
  ---
-## Overview
 
-The solution consists of:
-- **GovernanceNotebook.py**: A Python notebook that extracts Power BI environment metadata (workspaces, datasets, reports, dataflows, etc.) and writes it to a Fabric Lakehouse
-- **Semantic Link Power BI Governance Model.pbit**: A Power BI template for visualizing and analyzing the extracted metadata
+## 🚀 Quick Start Instructions  
 
-## Prerequisites
-
-- Access to a Microsoft Fabric workspace
-- Permissions to create Fabric items (Environment, Lakehouse, Notebook)
-- Power BI Desktop (for the template)
-
---
 
 ## Step 1: Import the Notebook
 
