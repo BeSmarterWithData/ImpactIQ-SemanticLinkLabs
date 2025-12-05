@@ -1,7 +1,24 @@
-# Power BI & Fabric Governance Solution - Setup Guide
+# Power BI Governance & Impact Analysis Solution with Semantic Link Labs
 
-This repository contains a comprehensive Power BI governance solution that extracts metadata from your Power BI environment using Microsoft Fabric and semantic-link-labs.
+## What It Does
+This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the visual object layer. It also backs up and breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI Governance** solution.
 
+### Key Features:
+- **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
+- **Used and Unused Objects**: Identify which tables, columns, and measures are actively used and where. Equally as important, see what isn't used and can be safely removed from your model to save space and complexity.
+- **Comprehensive Environment Overview**: Gain a clear, detailed view of your entire Power BI environment, including complete breakdowns of your models, reports, and dataflows and their dependencies. 
+- **User-Friendly Output**: Results are presented in a Power BI model, making them easy to explore, analyze, and share with your team.
+
+---
+#### ✨ Recently Added Features
+
+- **Workspace Selector** → Only want to run this against 1, 2, 10 workspaces? Now
+a popup will allow you to choose which workspaces you run this against. Select All will still run against eveyrthing and a built-in timer ensures no selection will run against everything.
+- **Unused Model Objects** → Identify model fields/measures not used in any visuals, measures, calculated columns, or relationships.  
+- **Broken Visuals (with Page Links)** → See all broken visuals/filters and jump directly to the impacted report page.  
+- **Report-Level Measures Inventory** → Surface report-only measures with full DAX and usage details.
+- **New Report Layouts & Wireframe** → See where your visuals sit on the page with a wireframe layout - thanks to @stephbruno for this feature!
+ ---
 ## Overview
 
 The solution consists of:
@@ -14,33 +31,9 @@ The solution consists of:
 - Permissions to create Fabric items (Environment, Lakehouse, Notebook)
 - Power BI Desktop (for the template)
 
----
+--
 
-## Step 1: Create a Fabric Environment with semantic-link-labs
-
-1. **Navigate to your Fabric workspace**
-
-
-2. **Create a new Environment**
-   - Click **New** → **More options** → **Environment**
-   - Give it a descriptive name (e.g., "Power BI Governance Environment")
-
-3. **Add the semantic-link-labs library**
-   - In the Environment settings, go to **Public libraries** on the left
-   - Click **Add from PyPI**
-   - Choose **Pip**
-   - Search for: `semantic_link_labs` (exactly as written, lowercase with underscores)
-   - The version will auto-fill - leave it as the default
-   - Click **Add**
-
-4. **Publish the Environment**
-   - Click **Publish** at the top right
-   - Click **Publish All**
-   - Wait for the environment to finish publishing
-
----
-
-## Step 2: Import the Notebook
+## Step 1: Import the Notebook
 
 1. **Download the notebook**
    - Download `GovernanceNotebook.py` from this repository
@@ -53,7 +46,7 @@ The solution consists of:
 
 ---
 
-## Step 3: Create a Lakehouse
+## Step 2: Create a Lakehouse
 
 1. **Create a new Lakehouse**
    - Once in the notebook, click **Add lakehouse** on the left panel
@@ -64,16 +57,7 @@ The solution consists of:
 
 ---
 
-## Step 4: Assign the Environment to the Notebook
-
-2. **Change the Environment**
-   - At the top of the notebook, locate the **Environment** dropdown
-   - Click **Change environment**
-   - Select the Environment you created in Step 1
-   - Wait for the environment to be attached (this may take a moment)
----
-
-## Step 5: Run the Notebook
+## Step 3: Run the Notebook
 
 ### Configuration (Optional)
 
@@ -89,25 +73,39 @@ LAKEHOUSE_SCHEMA = "dbo"          # Schema name in your Lakehouse
 WORKSPACE_NAMES = ["All"]         # ["All"] or ["Workspace1", "Workspace2"]
 MAX_PARALLEL_WORKERS = 5          # 1-10 (higher = faster but more API load)
 ```
+---
 
-### Running the Notebook
+## Step 4: Open & Refresh The Power BI Model / Report Template
 
-1. **Run all cells**
-   - Click **Run all** at the top of the notebook
-   - OR click the play button in each cell sequentially
+1. **Open the template**
+   - Download `Semantic Link Power BI Governance Model.pbit` from this repository
+   - Open it with Power BI Desktop
 
-3. **Verify the output**
-   - Once complete, your Lakehouse wil have the following tables in the `dbo` schema (this happens even if you don't have data related to the table - it's needed for the semantic model):
-     - `Workspaces`, `Datasets`, `Reports`, `Dataflows`, `FabricItems`
-     - `DatasetSourcesInfo`, `DatasetRefreshHistory`
-     - `DataflowSourcesInfo`, `DataflowRefreshHistory`, `DataflowDetail`
-     - `ReportPages`, `Pages`, `Visuals`, `Bookmarks`, etc.
-     - `ModelDetail`, `ModelDependencies`
-     - `Apps`, `AppReports`
+3. **Get the Lakehouse SQL Connection String**
+   - Go back to your Fabric workspace
+   - Find your Lakehouse in the workspace items list
+   - Look for the item with type **SQL analytics endpoint** (same name as your Lakehouse)
+   - Click on it to open the SQL analytics endpoint
+   - At the bottom left, click **Copy SQL connection string**
+
+4. **Enter connection parameters**
+   - The template will prompt you for:
+     - **SQL Connection String**: Paste the connection string from step 3
+     - **Lakehouse Name**: Enter the exact name of your Lakehouse (e.g., "PowerBIGovernance")
+   - Click **Load**
+
+5. **Authenticate**
+   - Choose **Organizational account** authentication
+   - Sign in with your Microsoft/Azure credentials
+   - Click **Connect**
+
+6. **Wait for data to load**
+   - Power BI will load all the metadata from your Lakehouse
+   - This may take a few minutes depending on data volume
 
 ---
 
-## Step 6: Schedule the Notebook in a Pipeline (Optional)
+## (Optional) Schedule the Notebook in a Pipeline
 
 To automate regular metadata extraction:
 
@@ -131,164 +129,43 @@ To automate regular metadata extraction:
 4. **Save and run**
    - Click **Run** to test immediately
    - Monitor the run status in the pipeline view
-
 ---
 
-## Step 7: Connect the Power BI Template
-
-1. **Download Power BI Desktop**
-   - If you don't have it, download from https://powerbi.microsoft.com/desktop/
-
-2. **Open the template**
-   - Download `Semantic Link Power BI Governance Model.pbit` from this repository
-   - Open it with Power BI Desktop
-
-3. **Get the Lakehouse SQL Connection String**
-   - Go back to your Fabric workspace
-   - Find your Lakehouse in the workspace items list
-   - Look for the item with type **SQL analytics endpoint** (same name as your Lakehouse)
-   - Click on it to open the SQL analytics endpoint
-   - At the bottom left, click **Copy SQL connection string**
-
-4. **Enter connection parameters**
-   - The template will prompt you for:
-     - **SQL Connection String**: Paste the connection string from step 3
-       - Format: `<workspace-id>.datawarehouse.fabric.microsoft.com`
-       - Remove any `server=` or other prefixes if present
-     - **Lakehouse Name**: Enter the exact name of your Lakehouse (e.g., "PowerBIGovernance")
-   - Click **Load**
-
-5. **Authenticate**
-   - Choose **Organizational account** authentication
-   - Sign in with your Microsoft/Azure credentials
-   - Click **Connect**
-
-6. **Wait for data to load**
-   - Power BI will load all the metadata from your Lakehouse
-   - This may take a few minutes depending on data volume
-
+---
+## Features
+  
 ---
 
-## Step 8: Publish and Schedule Refresh
+# Power BI Governance & Impact Analysis Solution
 
-1. **Publish the report**
-   - In Power BI Desktop, click **File** → **Publish** → **Publish to Power BI**
-   - Select your workspace
-   - Click **Select**
+## What It Does
+This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the visual object layer. It also backs up and breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI Governance** solution.
 
-2. **Configure scheduled refresh**
-   - In the Power BI Service (https://app.powerbi.com)
-   - Go to your workspace
-   - Find the dataset (same name as your report)
-   - Click **...** (More options) → **Settings**
-   - Expand **Scheduled refresh**
-   - Configure refresh frequency
-   - Click **Apply**
-
-3. **Create a coordinated schedule**
-   - Schedule the notebook to run first (e.g., 2:00 AM)
-   - Schedule the Power BI dataset refresh shortly after (e.g., 3:00 AM)
-   - This ensures fresh data is available when the report refreshes
+### Key Features:
+- **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
+- **Used and Unused Objects**: Identify which tables, columns, and measures are actively used and where. Equally as important, see what isn't used and can be safely removed from your model to save space and complexity.
+- **Comprehensive Environment Overview**: Gain a clear, detailed view of your entire Power BI environment, including complete breakdowns of your models, reports, and dataflows and their dependencies. 
+- **User-Friendly Output**: Results are presented in a Power BI model, making them easy to explore, analyze, and share with your team.
 
 ---
+#### ✨ Recently Added Features
 
-## Troubleshooting
+- **Workspace Selector** → Only want to run this against 1, 2, 10 workspaces? Now
+a popup will allow you to choose which workspaces you run this against. Select All will still run against eveyrthing and a built-in timer ensures no selection will run against everything.
+- **Unused Model Objects** → Identify model fields/measures not used in any visuals, measures, calculated columns, or relationships.  
+- **Broken Visuals (with Page Links)** → See all broken visuals/filters and jump directly to the impacted report page.  
+- **Report-Level Measures Inventory** → Surface report-only measures with full DAX and usage details.
+- **New Report Layouts & Wireframe** → See where your visuals sit on the page with a wireframe layout - thanks to @stephbruno for this feature!
+ ---
 
-### Notebook fails with "Module not found: sempy_labs"
-- **Solution**: Ensure you've created an Environment with semantic-link-labs and assigned it to the notebook (Steps 1 & 4)
+## Screenshots of Final Output
+..
+..
 
-### "Schema not found" error
-- **Solution**: Ensure you enabled "Lakehouse schemas" when creating the Lakehouse (Step 3)
-
-### Power BI template can't connect
-- **Solution**: 
-  - Verify you copied the correct SQL connection string from the **SQL analytics endpoint** (not the Lakehouse itself)
-  - Ensure the Lakehouse name matches exactly (case-sensitive)
-  - Check that tables exist in the Lakehouse after running the notebook
-
-### Tables are empty in Power BI
-- **Solution**: 
-  - Verify the notebook ran successfully and check for errors in the output
-  - Confirm you have access to Power BI workspaces (the notebook can only extract data from workspaces you have access to)
-  - Check that `WORKSPACE_NAMES` is set correctly in the notebook configuration
-
-### Performance is slow
-- **Solution**:
-  - Adjust `MAX_PARALLEL_WORKERS` (higher values = faster but more API load)
-  - Consider filtering to specific workspaces instead of `["All"]`
-  - Run during off-peak hours to reduce API throttling
-
----
-
-## Data Extracted
-
-The solution extracts comprehensive metadata including:
-
-### Environment Data
-- Workspaces, Datasets, Reports, Dataflows
-- Fabric Items (Lakehouses, Warehouses, Notebooks, etc.)
-- Apps and App Reports
-- Dataset data sources and refresh history
-- Dataflow sources, refresh history, and lineage
-
-### Report Metadata
-- Report pages and visuals
-- Bookmarks and custom visuals
-- Report, page, and visual filters
-- Visual objects and interactions
-- Report-level measures
-
-### Model Metadata
-- Tables, columns, measures, hierarchies
-- Calculated columns and calculation groups
-- Partitions and relationships
-- DAX expressions and dependencies
-
-### Dataflow Details
-- Power Query M expressions
-- Query names and definitions
-- Both Gen1 (Power BI) and Gen2 (Fabric) dataflows
-
----
-
-## Configuration Options
-
-### Workspace Filtering
-
-To scan all workspaces (default):
-```python
-WORKSPACE_NAMES = ["All"]
-```
-
-To scan specific workspaces (maximum 10):
-```python
-WORKSPACE_NAMES = ["Marketing", "Finance", "Sales"]
-```
-
-**Note**: You can specify up to 10 workspaces. If you need to scan more, use `["All"]` or run the notebook multiple times with different workspace lists.
-
-### Schema Name
-
-To use a custom schema (must exist or will be auto-created):
-```python
-LAKEHOUSE_SCHEMA = "governance"
-```
-
-### Performance Tuning
-
-Adjust parallel workers (1-10):
-```python
-MAX_PARALLEL_WORKERS = 5  # Default: 5
-```
-- Lower values (1-3): Slower but gentler on APIs
-- Higher values (7-10): Faster but may hit rate limits
-
----
-
-## Support and Contributions
-
-For issues, questions, or contributions, please visit the GitHub repository.
-
-## License
-
-This solution is provided as-is for Power BI governance and metadata extraction purposes.
+<img width="1235" alt="image" src="https://github.com/user-attachments/assets/805d3145-8290-4d84-8da2-bb27529bb050">
+<img width="1259" alt="image" src="https://github.com/user-attachments/assets/54212360-8d0f-44c5-9337-db2cdd0fb5ee">
+<img width="1240" alt="image" src="https://github.com/user-attachments/assets/488fc303-a9fa-4d4e-b0ce-c827fb440e83">
+<img width="1259" alt="image" src="https://github.com/user-attachments/assets/9280e350-8714-40e5-8e09-d1de07faf5f5">
+<img width="1221" alt="image" src="https://github.com/user-attachments/assets/e120c1bb-b52a-4197-aeb3-2a6ddbb67a9f">
+<img width="1221" alt="image" src="https://github.com/user-attachments/assets/c9f5331d-8976-4f66-be76-5628e38e8d0f">
+<img width="1241" alt="image" src="https://github.com/user-attachments/assets/9d814034-494d-478b-b231-f759d7eebeab">
