@@ -2403,7 +2403,7 @@ write_table(all_dataflow_details, "DataflowDetail")
 heartbeat_running = False
 
 log("\n" + "="*80)
-log("PROCESS COMPLETE")
+log("DATA EXTRACTION COMPLETE")
 log(f"Finished at: {datetime.now()}")
 log(f"Total runtime: {elapsed_min():.2f} minutes")
 log("="*80)
@@ -2492,7 +2492,7 @@ try:
                 endpoint_id = matching_endpoint.get('id')
                 
                 # Refresh the SQL endpoint metadata
-                # Note: The refresh API doesn't require any parameters, so we pass an empty JSON payload
+                # Note: The refresh API requires a JSON body but doesn't need any parameters
                 refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
                 refresh_response = client.post(refresh_url, json={})
                 
