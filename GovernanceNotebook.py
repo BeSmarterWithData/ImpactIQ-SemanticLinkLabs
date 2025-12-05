@@ -2492,7 +2492,7 @@ try:
                 endpoint_id = matching_endpoint.get('id')
                 
                 # Refresh the SQL endpoint metadata
-                # Note: The refresh API requires a JSON body but doesn't need any parameters
+                # The API expects a JSON body but all parameters are optional, so we pass an empty object
                 refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
                 refresh_response = client.post(refresh_url, json={})
                 
