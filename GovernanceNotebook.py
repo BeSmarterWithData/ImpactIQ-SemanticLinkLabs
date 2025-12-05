@@ -2476,34 +2476,26 @@ try:
             sql_endpoints = response.json().get('value', [])
             log(f"  Found {len(sql_endpoints)} SQL endpoint(s) in workspace")
             
-            # Find the SQL endpoint matching our lakehouse name
-            matching_endpoint = None
-            for endpoint in sql_endpoints:
-                endpoint_name = endpoint.get('displayName', '')
-                endpoint_id = endpoint.get('id', '')
+            # Refresh all SQL endpoints in the workspace
+            if sql_endpoints:
+                log(f"  Refreshing {len(sql_endpoints)} SQL endpoint(s)...")
                 
-                # SQL endpoint name should match the lakehouse name
-                if endpoint_name == lakehouse_name:
-                    matching_endpoint = endpoint
-                    log(f"  Found matching SQL endpoint: {endpoint_name} (ID: {endpoint_id})")
-                    break
-            
-            if matching_endpoint:
-                endpoint_id = matching_endpoint.get('id')
-                
-                # Refresh the SQL endpoint metadata
-                # The API expects a JSON body but all parameters are optional, so we pass an empty object
-                refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
-                refresh_response = client.post(refresh_url, json={})
-                
-                if refresh_response.status_code in [200, 202]:
-                    log(f"  ✓ SQL endpoint metadata refresh initiated successfully")
-                else:
-                    log(f"  Warning: SQL endpoint refresh returned status {refresh_response.status_code}")
-                    log(f"  Response: {refresh_response.text}")
+                for endpoint in sql_endpoints:
+                    endpoint_name = endpoint.get('displayName', '')
+                    endpoint_id = endpoint.get('id', '')
+                    
+                    # Refresh the SQL endpoint metadata
+                    # The API expects a JSON body but all parameters are optional, so we pass an empty object
+                    refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
+                    refresh_response = client.post(refresh_url, json={})
+                    
+                    if refresh_response.status_code in [200, 202]:
+                        log(f"  ✓ Refreshed SQL endpoint: {endpoint_name}")
+                    else:
+                        log(f"  Warning: SQL endpoint '{endpoint_name}' refresh returned status {refresh_response.status_code}")
+                        log(f"  Response: {refresh_response.text}")
             else:
-                log(f"  Warning: Could not find SQL endpoint matching lakehouse '{lakehouse_name}'")
-                log(f"  Available endpoints: {[ep.get('displayName', '') for ep in sql_endpoints]}")
+                log(f"  Warning: No SQL endpoints found in workspace")
         else:
             log(f"  Warning: Could not list SQL endpoints (status {response.status_code})")
             log(f"  Response: {response.text}")
