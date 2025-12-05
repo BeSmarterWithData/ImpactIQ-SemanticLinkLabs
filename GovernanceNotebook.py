@@ -1413,6 +1413,31 @@ def get_dependency_name(dep_obj):
     else:
         return dep_obj.Name
 
+def get_friendly_error_message(error, context=""):
+    """
+    Parse error messages and return user-friendly descriptions.
+    
+    Args:
+        error: The exception or error message string
+        context: Optional context for the error message (e.g., "opening model", "accessing workspace")
+    
+    Returns:
+        str: User-friendly error message
+    """
+    error_msg = str(error)
+    
+    # Check for common error patterns
+    if "does not have permission" in error_msg or "Discover method" in error_msg:
+        return f"Insufficient permissions{' ' + context if context else ''}"
+    elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower() or "cannot be found" in error_msg.lower()):
+        return f"Session timeout or connection lost{' ' + context if context else ''}"
+    elif "database is empty" in error_msg.lower():
+        return "Database is empty (staging lakehouse or no data)"
+    elif "'NoneType' object has no attribute" in error_msg:
+        return "Model connection may have been lost"
+    else:
+        return str(error)
+
 # ==============================================================  
 # GET WORKSPACES
 # ==============================================================
@@ -1455,13 +1480,7 @@ for ws_row in workspaces_df.itertuples(index=False):
             try:
                 tom = TOMWrapper(dataset=model_name, workspace=ws_name, readonly=True)
             except Exception as e:
-                error_msg = str(e)
-                if "does not have permission" in error_msg or "Discover method" in error_msg:
-                    log(f"    ERROR opening model {model_name}: Insufficient permissions")
-                elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower()):
-                    log(f"    ERROR opening model {model_name}: Session timeout or connection lost")
-                else:
-                    log(f"    ERROR opening model {model_name}: {e}")
+                log(f"    ERROR opening model {model_name}: {get_friendly_error_message(e)}")
                 continue
 
             # Initialize variables that may be used later in dependencies
@@ -1881,29 +1900,13 @@ for ws_row in workspaces_df.itertuples(index=False):
                     else:
                         log(f"    No dependencies found")
             except Exception as e:
-                error_msg = str(e)
-                # Provide more specific error messages based on common issues
-                if "database is empty" in error_msg.lower():
-                    log(f"    Warning: Could not extract dependencies - database is empty (staging lakehouse or no data)")
-                elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower() or "cannot be found" in error_msg.lower()):
-                    log(f"    Warning: Could not extract dependencies - session timeout or connection lost")
-                elif "'NoneType' object has no attribute" in error_msg:
-                    log(f"    Warning: Could not extract dependencies - model connection may have been lost")
-                else:
-                    log(f"    Warning: Could not extract dependencies: {e}")
+                log(f"    Warning: Could not extract dependencies - {get_friendly_error_message(e)}")
 
             log(f"  → Finished {model_name} in {time.time() - t0:.1f} sec "
                 f"(Total: {elapsed_min():.2f} min)")
 
     except Exception as e:
-        error_msg = str(e)
-        # Check for common error types and provide more helpful messages
-        if "does not have permission" in error_msg or "Discover method" in error_msg:
-            log(f"ERROR accessing workspace {ws_name}: Insufficient permissions to access this workspace")
-        elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower()):
-            log(f"ERROR accessing workspace {ws_name}: Session timeout - workspace may have large datasets or connectivity issues")
-        else:
-            log(f"ERROR accessing workspace {ws_name}: {e}")
+        log(f"ERROR accessing workspace {ws_name}: {get_friendly_error_message(e, 'accessing workspace')}")
 
 # ==============================================================  
 # WRITE TO LAKEHOUSE
