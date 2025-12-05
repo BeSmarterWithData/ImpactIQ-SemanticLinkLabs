@@ -1546,9 +1546,9 @@ for ws_row in workspaces_df.itertuples(index=False):
                     # Get parent table name - use Parent property instead of CalculationGroup
                     parent_table_name = ""
                     try:
-                        if hasattr(ci, 'Parent') and ci.Parent:
+                        if hasattr(ci, 'Parent') and ci.Parent and hasattr(ci.Parent, 'Name'):
                             parent_table_name = ci.Parent.Name
-                        elif hasattr(ci, 'CalculationGroup') and ci.CalculationGroup:
+                        elif hasattr(ci, 'CalculationGroup') and ci.CalculationGroup and hasattr(ci.CalculationGroup, 'Name'):
                             parent_table_name = ci.CalculationGroup.Name
                     except Exception:
                         parent_table_name = "Unknown"
@@ -1812,7 +1812,7 @@ for ws_row in workspaces_df.itertuples(index=False):
             # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
             try:
                 # Skip dependency extraction for empty models (no tables)
-                if not hasattr(tom.model, 'Tables') or tom.model.Tables.Count == 0:
+                if not hasattr(tom.model, 'Tables') or not hasattr(tom.model.Tables, 'Count') or tom.model.Tables.Count == 0:
                     log(f"    Warning: Skipping dependencies - model has no tables")
                 elif not measures and not calc_columns and not calc_items:
                     log(f"    Warning: Skipping dependencies - no calculated objects to analyze")
