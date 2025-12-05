@@ -1537,9 +1537,19 @@ for ws_row in workspaces_df.itertuples(index=False):
                 extracted_calc_items = list(tom.all_calculation_items())
                 log(f"    Calculation Items: {len(extracted_calc_items)}")
                 for ci in extracted_calc_items:
+                    # Get parent table name - use Parent property instead of CalculationGroup
+                    parent_table_name = ""
+                    try:
+                        if hasattr(ci, 'Parent') and ci.Parent:
+                            parent_table_name = ci.Parent.Name
+                        elif hasattr(ci, 'CalculationGroup') and ci.CalculationGroup:
+                            parent_table_name = ci.CalculationGroup.Name
+                    except Exception:
+                        parent_table_name = "Unknown"
+                    
                     all_model_details.append({
                         "Type": "CalculationItem",
-                        "Table": ci.CalculationGroup.Name,
+                        "Table": parent_table_name,
                         "Name": ci.Name,
                         "FormatString": "",
                         "DisplayFolder": "",
@@ -1795,77 +1805,99 @@ for ws_row in workspaces_df.itertuples(index=False):
             # Uses TOMWrapper.depends_on method documented at:
             # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
             try:
-                dependencies_df = get_model_calc_dependencies(
-                    dataset=model_name,
-                    workspace=ws_name
-                )
-                
-                if dependencies_df is not None and not dependencies_df.empty:
-                    dep_count_before = len(all_model_dependencies)
-                    
-                    # Measure Dependencies
-                    for m in measures:
-                        try:
-                            for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
-                                all_model_dependencies.append({
-                                    "ObjectName": m.Name,
-                                    "ObjectType": "Measure",
-                                    "DependsOn": get_dependency_name(dep_obj),
-                                    "DependsOnType": str(dep_obj.ObjectType),
-                                    "ModelAsOfDate": REPORT_DATE,
-                                    "ModelName": model_name,
-                                    "ModelID": model_id,
-                                    "WorkspaceName": ws_name
-                                })
-                        except Exception as e:
-                            log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
-
-                    # Calculated Column Dependencies
-                    for col in calc_columns:
-                        try:
-                            for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
-                                all_model_dependencies.append({
-                                    "ObjectName": col.Name,
-                                    "ObjectType": "CalculatedColumn",
-                                    "DependsOn": get_dependency_name(dep_obj),
-                                    "DependsOnType": str(dep_obj.ObjectType),
-                                    "ModelAsOfDate": REPORT_DATE,
-                                    "ModelName": model_name,
-                                    "ModelID": model_id,
-                                    "WorkspaceName": ws_name
-                                })
-                        except Exception as e:
-                            log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
-
-                    # Calculation Item Dependencies
-                    for ci in calc_items:
-                        try:
-                            for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
-                                all_model_dependencies.append({
-                                    "ObjectName": ci.Name,
-                                    "ObjectType": "CalculationItem",
-                                    "DependsOn": get_dependency_name(dep_obj),
-                                    "DependsOnType": str(dep_obj.ObjectType),
-                                    "ModelAsOfDate": REPORT_DATE,
-                                    "ModelName": model_name,
-                                    "ModelID": model_id,
-                                    "WorkspaceName": ws_name
-                                })
-                        except Exception as e:
-                            log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")
-                    
-                    dep_count = len(all_model_dependencies) - dep_count_before
-                    log(f"    Dependencies extracted: {dep_count}")
+                # Skip dependency extraction for empty models (no tables)
+                if not hasattr(tom.model, 'Tables') or tom.model.Tables.Count == 0:
+                    log(f"    Warning: Skipping dependencies - model has no tables")
+                elif not measures and not calc_columns and not calc_items:
+                    log(f"    Warning: Skipping dependencies - no calculated objects to analyze")
                 else:
-                    log(f"    No dependencies found")
+                    dependencies_df = get_model_calc_dependencies(
+                        dataset=model_name,
+                        workspace=ws_name
+                    )
+                    
+                    if dependencies_df is not None and not dependencies_df.empty:
+                        dep_count_before = len(all_model_dependencies)
+                        
+                        # Measure Dependencies
+                        for m in measures:
+                            try:
+                                for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": m.Name,
+                                        "ObjectType": "Measure",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for measure {m.Name}: {e}")
+
+                        # Calculated Column Dependencies
+                        for col in calc_columns:
+                            try:
+                                for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": col.Name,
+                                        "ObjectType": "CalculatedColumn",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for calculated column {col.Name}: {e}")
+
+                        # Calculation Item Dependencies
+                        for ci in calc_items:
+                            try:
+                                for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
+                                    all_model_dependencies.append({
+                                        "ObjectName": ci.Name,
+                                        "ObjectType": "CalculationItem",
+                                        "DependsOn": get_dependency_name(dep_obj),
+                                        "DependsOnType": str(dep_obj.ObjectType),
+                                        "ModelAsOfDate": REPORT_DATE,
+                                        "ModelName": model_name,
+                                        "ModelID": model_id,
+                                        "WorkspaceName": ws_name
+                                    })
+                            except Exception as e:
+                                log(f"      Warning: Could not get dependencies for calculation item {ci.Name}: {e}")
+                        
+                        dep_count = len(all_model_dependencies) - dep_count_before
+                        log(f"    Dependencies extracted: {dep_count}")
+                    else:
+                        log(f"    No dependencies found")
             except Exception as e:
-                log(f"    Warning: Could not extract dependencies: {e}")
+                error_msg = str(e)
+                # Provide more specific error messages based on common issues
+                if "database is empty" in error_msg.lower():
+                    log(f"    Warning: Could not extract dependencies - database is empty (staging lakehouse or no data)")
+                elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower() or "cannot be found" in error_msg.lower()):
+                    log(f"    Warning: Could not extract dependencies - session timeout or connection lost")
+                elif "'NoneType' object has no attribute" in error_msg:
+                    log(f"    Warning: Could not extract dependencies - model connection may have been lost")
+                else:
+                    log(f"    Warning: Could not extract dependencies: {e}")
 
             log(f"  → Finished {model_name} in {time.time() - t0:.1f} sec "
                 f"(Total: {elapsed_min():.2f} min)")
 
     except Exception as e:
-        log(f"ERROR accessing workspace {ws_name}: {e}")
+        error_msg = str(e)
+        # Check for common error types and provide more helpful messages
+        if "does not have permission" in error_msg or "Discover method" in error_msg:
+            log(f"ERROR accessing workspace {ws_name}: Insufficient permissions to access this workspace")
+        elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower()):
+            log(f"ERROR accessing workspace {ws_name}: Session timeout - workspace may have large datasets or connectivity issues")
+        else:
+            log(f"ERROR accessing workspace {ws_name}: {e}")
 
 # ==============================================================  
 # WRITE TO LAKEHOUSE
