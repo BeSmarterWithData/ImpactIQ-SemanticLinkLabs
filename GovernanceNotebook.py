@@ -1455,7 +1455,13 @@ for ws_row in workspaces_df.itertuples(index=False):
             try:
                 tom = TOMWrapper(dataset=model_name, workspace=ws_name, readonly=True)
             except Exception as e:
-                log(f"    ERROR opening model {model_name}: {e}")
+                error_msg = str(e)
+                if "does not have permission" in error_msg or "Discover method" in error_msg:
+                    log(f"    ERROR opening model {model_name}: Insufficient permissions")
+                elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower()):
+                    log(f"    ERROR opening model {model_name}: Session timeout or connection lost")
+                else:
+                    log(f"    ERROR opening model {model_name}: {e}")
                 continue
 
             # Initialize variables that may be used later in dependencies
