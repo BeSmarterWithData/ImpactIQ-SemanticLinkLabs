@@ -1425,12 +1425,13 @@ def get_friendly_error_message(error, context=""):
         str: User-friendly error message
     """
     error_msg = str(error)
+    context_suffix = f" {context}" if context else ""
     
     # Check for common error patterns
     if "does not have permission" in error_msg or "Discover method" in error_msg:
-        return f"Insufficient permissions{' ' + context if context else ''}"
+        return f"Insufficient permissions{context_suffix}"
     elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower() or "cannot be found" in error_msg.lower()):
-        return f"Session timeout or connection lost{' ' + context if context else ''}"
+        return f"Session timeout or connection lost{context_suffix}"
     elif "database is empty" in error_msg.lower():
         return "Database is empty (staging lakehouse or no data)"
     elif "'NoneType' object has no attribute" in error_msg:
@@ -1831,7 +1832,11 @@ for ws_row in workspaces_df.itertuples(index=False):
             # https://semantic-link-labs.readthedocs.io/en/stable/sempy_labs.tom.html#sempy_labs.tom.TOMWrapper.depends_on
             try:
                 # Skip dependency extraction for empty models (no tables)
-                if not hasattr(tom.model, 'Tables') or not hasattr(tom.model.Tables, 'Count') or tom.model.Tables.Count == 0:
+                has_tables = (hasattr(tom.model, 'Tables') and 
+                             hasattr(tom.model.Tables, 'Count') and 
+                             tom.model.Tables.Count > 0)
+                
+                if not has_tables:
                     log(f"    Warning: Skipping dependencies - model has no tables")
                 elif not measures and not calc_columns and not calc_items:
                     log(f"    Warning: Skipping dependencies - no calculated objects to analyze")
