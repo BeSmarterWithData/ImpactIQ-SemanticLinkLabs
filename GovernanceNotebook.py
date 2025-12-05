@@ -2431,7 +2431,6 @@ log(f"Started: {datetime.now()}")
 log("="*80)
 
 try:
-    # Get workspace context from the attached lakehouse
     log("\nGetting workspace context...")
     
     workspace_id = None
@@ -2451,7 +2450,7 @@ try:
     except Exception as e:
         log(f"  Could not get lakehouse name: {e}")
     
-    # If we don't have workspace ID, we can't proceed
+    # If we don't have workspace ID or lakehouse name, we can't proceed
     if not workspace_id:
         log("\n  ERROR: Unable to get workspace ID from notebook context")
         log("  This feature requires running in a Fabric notebook environment.")
