@@ -19,8 +19,7 @@ The solution consists of:
 ## Step 1: Create a Fabric Environment with semantic-link-labs
 
 1. **Navigate to your Fabric workspace**
-   - Go to https://app.fabric.microsoft.com
-   - Select or create a workspace
+
 
 2. **Create a new Environment**
    - Click **New** → **More options** → **Environment**
@@ -30,7 +29,7 @@ The solution consists of:
    - In the Environment settings, go to **Public libraries** on the left
    - Click **Add from PyPI**
    - Choose **Pip**
-   - Search for: `semantic-link-labs` (exactly as written, lowercase with underscores)
+   - Search for: `semantic_link_labs` (exactly as written, lowercase with underscores)
    - The version will auto-fill - leave it as the default
    - Click **Add**
 
@@ -57,36 +56,30 @@ The solution consists of:
 ## Step 3: Create a Lakehouse
 
 1. **Create a new Lakehouse**
-   - In the notebook view, click **Add lakehouse** on the left panel
+   - Once in the notebook, click **Add lakehouse** on the left panel
    - Select **New lakehouse**
    - Give it a descriptive name (e.g., "PowerBIGovernance")
    - **Important**: Enable **Lakehouse schemas** checkbox
    - Click **Create**
 
-2. **Verify the Lakehouse is attached**
-   - You should see your Lakehouse appear in the left panel under "Lakehouse"
-
 ---
 
 ## Step 4: Assign the Environment to the Notebook
-
-1. **Open the notebook** (if not already open)
 
 2. **Change the Environment**
    - At the top of the notebook, locate the **Environment** dropdown
    - Click **Change environment**
    - Select the Environment you created in Step 1
    - Wait for the environment to be attached (this may take a moment)
-
 ---
 
 ## Step 5: Run the Notebook
 
 ### Configuration (Optional)
 
-By default, the notebook is pre-configured with sensible defaults:
+By default, the notebook is pre-configured with  defaults:
 - **Lakehouse Schema**: `dbo` (the default schema)
-- **Workspaces**: `["All"]` (scans all accessible workspaces)
+- **Workspaces**: `["All"]` (scans all workspaces you have access to)
 - **Parallel Workers**: `5` (number of parallel API calls)
 
 You can modify these settings at the top of the notebook if needed:
@@ -103,13 +96,8 @@ MAX_PARALLEL_WORKERS = 5          # 1-10 (higher = faster but more API load)
    - Click **Run all** at the top of the notebook
    - OR click the play button in each cell sequentially
 
-2. **Monitor progress**
-   - The notebook will display progress as it extracts metadata
-   - Extraction time varies based on the number of workspaces and items
-   - Expect 5-15 minutes for most environments
-
 3. **Verify the output**
-   - Once complete, check your Lakehouse for the following tables in the `dbo` schema:
+   - Once complete, your Lakehouse wil have the following tables in the `dbo` schema (this happens even if you don't have data related to the table - it's needed for the semantic model):
      - `Workspaces`, `Datasets`, `Reports`, `Dataflows`, `FabricItems`
      - `DatasetSourcesInfo`, `DatasetRefreshHistory`
      - `DataflowSourcesInfo`, `DataflowRefreshHistory`, `DataflowDetail`
