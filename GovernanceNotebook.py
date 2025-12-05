@@ -2448,7 +2448,7 @@ try:
         lakehouse_name = spark.sql("SELECT current_catalog()").first()[0]
         log(f"  Lakehouse name: {lakehouse_name}")
     except Exception as e:
-        log(f"  Could not get lakehouse name: {e}")
+        log(f"  Could not get current catalog name from Spark SQL: {e}")
     
     # If we don't have workspace ID or lakehouse name, we can't proceed
     if not workspace_id:
@@ -2492,6 +2492,7 @@ try:
                 endpoint_id = matching_endpoint.get('id')
                 
                 # Refresh the SQL endpoint metadata
+                # Note: The refresh API doesn't require any parameters, so we pass an empty JSON payload
                 refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
                 refresh_response = client.post(refresh_url, json={})
                 
