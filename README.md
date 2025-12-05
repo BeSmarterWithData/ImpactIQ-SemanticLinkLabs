@@ -3,7 +3,7 @@
 ## What It Does
 This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI & Fabric Governance** solution.
 
-This solution leverages Semantic Link Labs to output the metadata to a Lakehouse and includes a Power BI Semanitc Model & Report to get a holistic view of your environment. 
+This solution leverages Semantic Link Labs to output the metadata to a Lakehouse and includes a Power BI Semantic Model & Report to get a holistic view of your environment. 
 
 ### Key Features:
 - **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
