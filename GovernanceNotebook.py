@@ -2407,3 +2407,115 @@ log("PROCESS COMPLETE")
 log(f"Finished at: {datetime.now()}")
 log(f"Total runtime: {elapsed_min():.2f} minutes")
 log("="*80)
+
+
+# In[5]:
+
+
+# ================================
+# SQL ENDPOINT METADATA REFRESH
+# ================================
+# After writing tables to the lakehouse, refresh the SQL endpoint metadata
+# so that the tables are immediately available for querying via SQL endpoint.
+# 
+# This uses the Fabric REST API to:
+# 1. Get the workspace ID from the notebook context (attached lakehouse)
+# 2. List SQL endpoints in the workspace
+# 3. Find the SQL endpoint matching the lakehouse name
+# 4. Refresh the SQL endpoint metadata
+# ================================
+
+log("\n" + "="*80)
+log("SQL ENDPOINT METADATA REFRESH")
+log(f"Started: {datetime.now()}")
+log("="*80)
+
+try:
+    # Get workspace context from the attached lakehouse
+    log("\nGetting workspace context...")
+    
+    workspace_id = None
+    lakehouse_name = None
+    
+    # Try to get workspace ID from spark configuration
+    try:
+        workspace_id = spark.conf.get("trident.workspace.id")
+        log(f"  Workspace ID: {workspace_id}")
+    except Exception as e:
+        log(f"  Could not get workspace ID from spark config: {e}")
+    
+    # Get the lakehouse/catalog name
+    try:
+        lakehouse_name = spark.sql("SELECT current_catalog()").first()[0]
+        log(f"  Lakehouse name: {lakehouse_name}")
+    except Exception as e:
+        log(f"  Could not get lakehouse name: {e}")
+    
+    # If we don't have workspace ID, we can't proceed
+    if not workspace_id:
+        log("\n  ERROR: Unable to get workspace ID from notebook context")
+        log("  This feature requires running in a Fabric notebook environment.")
+        log("\nERROR during SQL endpoint refresh: Unable to get workspace ID")
+        log("This is not critical - tables are still written to lakehouse.")
+        log("You may need to manually refresh the SQL endpoint if needed.")
+    elif not lakehouse_name:
+        log("\n  ERROR: Unable to get lakehouse name from catalog")
+        log("\nERROR during SQL endpoint refresh: Unable to get lakehouse name")
+        log("This is not critical - tables are still written to lakehouse.")
+        log("You may need to manually refresh the SQL endpoint if needed.")
+    else:
+        # Use FabricRestClient to refresh SQL endpoint
+        log(f"\nRefreshing SQL endpoint metadata for lakehouse: {lakehouse_name}")
+        
+        client = FabricRestClient()
+        
+        # List SQL endpoints in the workspace
+        sql_endpoints_url = f"v1/workspaces/{workspace_id}/sqlEndpoints"
+        response = client.get(sql_endpoints_url)
+        
+        if response.status_code == 200:
+            sql_endpoints = response.json().get('value', [])
+            log(f"  Found {len(sql_endpoints)} SQL endpoint(s) in workspace")
+            
+            # Find the SQL endpoint matching our lakehouse name
+            matching_endpoint = None
+            for endpoint in sql_endpoints:
+                endpoint_name = endpoint.get('displayName', '')
+                endpoint_id = endpoint.get('id', '')
+                
+                # SQL endpoint name should match the lakehouse name
+                if endpoint_name == lakehouse_name:
+                    matching_endpoint = endpoint
+                    log(f"  Found matching SQL endpoint: {endpoint_name} (ID: {endpoint_id})")
+                    break
+            
+            if matching_endpoint:
+                endpoint_id = matching_endpoint.get('id')
+                
+                # Refresh the SQL endpoint metadata
+                refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
+                refresh_response = client.post(refresh_url, json={})
+                
+                if refresh_response.status_code in [200, 202]:
+                    log(f"  ✓ SQL endpoint metadata refresh initiated successfully")
+                else:
+                    log(f"  Warning: SQL endpoint refresh returned status {refresh_response.status_code}")
+                    log(f"  Response: {refresh_response.text}")
+            else:
+                log(f"  Warning: Could not find SQL endpoint matching lakehouse '{lakehouse_name}'")
+                log(f"  Available endpoints: {[ep.get('displayName', '') for ep in sql_endpoints]}")
+        else:
+            log(f"  Warning: Could not list SQL endpoints (status {response.status_code})")
+            log(f"  Response: {response.text}")
+        
+        log("\n✓ SQL endpoint metadata refresh completed")
+
+except Exception as e:
+    log(f"\nERROR during SQL endpoint refresh: {e}")
+    log("This is not critical - tables are still written to lakehouse.")
+    log("You may need to manually refresh the SQL endpoint if needed.")
+
+log("\n" + "="*80)
+log("ALL PROCESSES COMPLETE")
+log(f"Finished at: {datetime.now()}")
+log("="*80)
