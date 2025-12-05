@@ -1,9 +1,11 @@
 # Power BI / Fabric Governance & Impact Analysis Solution 
 
 ## What It Does
-This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI & Fabric Governance** solution.
+This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI & Fabric Governance** solution. All of the metadata is outputted to a Fabric Lakehouse and can be scheduled for automated updates.
 
-This solution leverages Semantic Link Labs to output the metadata to a Lakehouse and includes a Power BI Semantic Model & Report to get a holistic view of your environment. 
+>*This is the Semantic Link Labs Python & Fabric Lakehouse version. If looking for a 1-click version that runs on any computer locally, provides report, model, and dataflow backups, and leverages the Power BI Service and REST API across all Workspaces, check out: https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution*
+
+>*Have specific Reports and/or Models downloaded you want to analyze? Don't have direct access to the Workspace but have the PBIX? Check out the local version here: https://github.com/chris1642/Local-Power-BI-Impact-Analysis-Governance*
 
 ### Key Features:
 - **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
