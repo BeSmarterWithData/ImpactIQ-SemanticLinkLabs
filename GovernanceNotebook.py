@@ -2443,12 +2443,12 @@ try:
     except Exception as e:
         log(f"  Could not get workspace ID from spark config: {e}")
     
-    # Get the lakehouse/catalog name
+    # Get the lakehouse name
     try:
-        lakehouse_name = spark.sql("SELECT current_catalog()").first()[0]
+        lakehouse_name = spark.conf.get("trident.lakehouse.name")
         log(f"  Lakehouse name: {lakehouse_name}")
     except Exception as e:
-        log(f"  Could not get current catalog name from Spark SQL: {e}")
+        log(f"  Could not get lakehouse name from spark config: {e}")
     
     # If we don't have workspace ID or lakehouse name, we can't proceed
     if not workspace_id:
@@ -2458,7 +2458,7 @@ try:
         log("This is not critical - tables are still written to lakehouse.")
         log("You may need to manually refresh the SQL endpoint if needed.")
     elif not lakehouse_name:
-        log("\n  ERROR: Unable to get lakehouse name from catalog")
+        log("\n  ERROR: Unable to get lakehouse name from notebook context")
         log("\nERROR during SQL endpoint refresh: Unable to get lakehouse name")
         log("This is not critical - tables are still written to lakehouse.")
         log("You may need to manually refresh the SQL endpoint if needed.")
