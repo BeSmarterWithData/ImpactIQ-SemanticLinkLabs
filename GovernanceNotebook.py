@@ -46,6 +46,19 @@ MAX_PARALLEL_WORKERS = 5
 #
 # ================================
 
+def install(package):
+    try:
+        from notebookutils import mssparkutils
+        if getattr(mssparkutils.runtime.context.get(), "isForPipeline", False):
+            print(f"[SKIP] Pipeline mode → not installing {package}")
+            return
+    except:
+        pass
+    
+    get_ipython().run_line_magic("pip", f"install {package}")
+
+install("semantic-link-labs")
+
 import re
 
 # Validate MAX_PARALLEL_WORKERS
