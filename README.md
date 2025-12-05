@@ -1,7 +1,7 @@
-# Power BI Governance & Impact Analysis Solution with Semantic Link Labs
+# Power BI Governance & Impact Analysis Solution 
 
 ## What It Does
-This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the visual object layer. It also backs up and breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI Governance** solution.
+This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI Governance** solution.
 
 ### Key Features:
 - **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
@@ -130,33 +130,6 @@ To automate regular metadata extraction:
    - Click **Run** to test immediately
    - Monitor the run status in the pipeline view
 ---
-
----
-## Features
-  
----
-
-# Power BI Governance & Impact Analysis Solution
-
-## What It Does
-This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the visual object layer. It also backs up and breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI Governance** solution.
-
-### Key Features:
-- **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
-- **Used and Unused Objects**: Identify which tables, columns, and measures are actively used and where. Equally as important, see what isn't used and can be safely removed from your model to save space and complexity.
-- **Comprehensive Environment Overview**: Gain a clear, detailed view of your entire Power BI environment, including complete breakdowns of your models, reports, and dataflows and their dependencies. 
-- **User-Friendly Output**: Results are presented in a Power BI model, making them easy to explore, analyze, and share with your team.
-
----
-#### ✨ Recently Added Features
-
-- **Workspace Selector** → Only want to run this against 1, 2, 10 workspaces? Now
-a popup will allow you to choose which workspaces you run this against. Select All will still run against eveyrthing and a built-in timer ensures no selection will run against everything.
-- **Unused Model Objects** → Identify model fields/measures not used in any visuals, measures, calculated columns, or relationships.  
-- **Broken Visuals (with Page Links)** → See all broken visuals/filters and jump directly to the impacted report page.  
-- **Report-Level Measures Inventory** → Surface report-only measures with full DAX and usage details.
-- **New Report Layouts & Wireframe** → See where your visuals sit on the page with a wireframe layout - thanks to @stephbruno for this feature!
- ---
 
 ## Screenshots of Final Output
 ..
