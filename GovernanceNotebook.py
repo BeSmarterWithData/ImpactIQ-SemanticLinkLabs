@@ -763,524 +763,6 @@ log("="*80)
 
 
 # ================================
-# FABRIC REPORT METADATA EXTRACTOR (ReportWrapper Only)
-# WITH AUTO-SCHEMA CREATION
-# ================================
-
-# %pip install semantic-link-labs --quiet
-
-import time, re, pandas as pd
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import sempy.fabric as fabric
-from sempy_labs.report import ReportWrapper
-# Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
-from sempy_labs._helper_functions import resolve_dataset_from_report
-
-# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES, MAX_PARALLEL_WORKERS
-
-EXTRACTION_TIMESTAMP = datetime.now()
-REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
-start_time = time.time()
-
-# -----------------------------------
-# Logging helpers
-# -----------------------------------
-def log(msg):
-    print(msg, flush=True)
-
-def elapsed_min():
-    return (time.time() - start_time) / 60
-
-# Heartbeat
-import threading
-heartbeat_running = True
-def heartbeat():
-    while heartbeat_running:
-        time.sleep(10)
-        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
-
-threading.Thread(target=heartbeat, daemon=True).start()
-
-# -----------------------------------
-# Start banner
-# -----------------------------------
-log("="*80)
-log("FABRIC REPORT METADATA EXTRACTION")
-log(f"Started: {EXTRACTION_TIMESTAMP}")
-log("="*80)
-
-# ============================================
-# AUTO-CREATE SCHEMA (LAKEHOUSE)
-# ============================================
-CATALOG = spark.sql("SELECT current_catalog()").first()[0]
-log(f"Using catalog: {CATALOG}")
-
-schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
-log(f"Ensuring lakehouse schema exists: {schema_name}")
-
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-log(f"✓ Schema is ready: {schema_name}\n")
-
-
-
-# ==============================================================  
-# COLLECTIONS & SCHEMA TEMPLATES
-# ==============================================================
-# Each collection includes a template row that defines the schema.
-# This ensures empty tables can be created with correct column structure.
-
-all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""}]
-all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""}]
-all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": False, "RowSubTotals": False, "ColumnSubTotals": False, "DataVisual": False, "HasSparkline": False, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
-all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "SuppressData": False, "CurrentPageSelected": False, "ApplyVisualDisplayState": False, "ApplyToAllVisuals": False, "ReportDate": "", "WorkspaceName": ""}]
-all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": "", "WorkspaceName": ""}]
-all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": False, "Sparkline": False, "VisualCalc": False, "Format": "", "ReportDate": "", "WorkspaceName": ""}]
-all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""}]
-all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
-
-# ==============================================================  
-# PARALLEL REPORT EXTRACTION HELPER
-# ==============================================================
-
-def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
-    """Extract metadata for a single report using ReportWrapper"""
-    result = {
-        'connections': [],
-        'pages': [],
-        'visuals': [],
-        'bookmarks': [],
-        'custom_visuals': [],
-        'report_filters': [],
-        'page_filters': [],
-        'visual_filters': [],
-        'visual_objects': [],
-        'report_level_measures': [],
-        'visual_interactions': [],
-        'error': None
-    }
-    
-    try:
-        rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
-        
-        # Add connection record
-        result['connections'].append({
-            "ReportID": rpt_id,
-            "ModelID": model_id,
-            "ReportDate": report_date,
-            "ReportName": rpt_name,
-            "Type": "",
-            "ServerName": "",
-            "WorkspaceName": ws_name
-        })
-        
-        # Pages
-        df = rpt.list_pages()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['pages'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "Id": row.get("Page Name", ""),
-                    "Name": row.get("Page Display Name", ""),
-                    "Number": 0,
-                    "Width": row.get("Width", 0),
-                    "Height": row.get("Height", 0),
-                    "HiddenFlag": bool(row.get("Hidden", False)),
-                    "VisualCount": row.get("Visual Count", 0),
-                    "Type": row.get("Display Option", ""),
-                    "DisplayOption": row.get("Display Option", ""),
-                    "DataVisualCount": row.get("Data Visual Count", 0),
-                    "VisibleVisualCount": row.get("Visible Visual Count", 0),
-                    "PageFilterCount": row.get("Page Filter Count", 0),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Visuals
-        df = rpt.list_visuals()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['visuals'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "PageName": row.get("Page Display Name", ""),
-                    "PageId": row.get("Page Name", ""),
-                    "Id": row.get("Visual Name", ""),
-                    "Name": row.get("Visual Name", ""),
-                    "Type": row.get("Type", ""),
-                    "DisplayType": row.get("Display Type", ""),
-                    "Title": row.get("Title", ""),
-                    "SubTitle": row.get("Sub Title", ""),
-                    "AltText": row.get("Alt Text", ""),
-                    "TabOrder": row.get("Tab Order", 0),
-                    "CustomVisualFlag": bool(row.get("Custom Visual", False)),
-                    "HiddenFlag": bool(row.get("Hidden", False)),
-                    "X": row.get("X", 0),
-                    "Y": row.get("Y", 0),
-                    "Z": row.get("Z", 0),
-                    "Width": row.get("Width", 0),
-                    "Height": row.get("Height", 0),
-                    "ObjectCount": row.get("Visual Object Count", 0),
-                    "VisualFilterCount": row.get("Visual Filter Count", 0),
-                    "DataLimit": row.get("Data Limit", 0),
-                    "Divider": bool(row.get("Divider", False)),
-                    "RowSubTotals": bool(row.get("Row Sub Totals", False)),
-                    "ColumnSubTotals": bool(row.get("Column Sub Totals", False)),
-                    "DataVisual": bool(row.get("Data Visual", False)),
-                    "HasSparkline": bool(row.get("Has Sparkline", False)),
-                    "ParentGroup": "",
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Bookmarks
-        df = rpt.list_bookmarks()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['bookmarks'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "Name": row.get("Bookmark Display Name", ""),
-                    "Id": row.get("Bookmark Name", ""),
-                    "PageName": row.get("Page Display Name", ""),
-                    "PageId": row.get("Page Name", ""),
-                    "VisualId": row.get("Visual Name", ""),
-                    "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
-                    "SuppressData": bool(row.get("Suppress Data", False)),
-                    "CurrentPageSelected": bool(row.get("Current Page Selected", False)),
-                    "ApplyVisualDisplayState": bool(row.get("Apply Visual Display State", False)),
-                    "ApplyToAllVisuals": bool(row.get("Apply To All Visuals", False)),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Custom Visuals
-        df = rpt.list_custom_visuals()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['custom_visuals'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "Name": row.get("Custom Visual Display Name", ""),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Report Filters
-        df = rpt.list_report_filters()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['report_filters'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "displayName": row.get("Filter Name", ""),
-                    "TableName": row.get("Table Name", ""),
-                    "ObjectName": row.get("Object Name", ""),
-                    "ObjectType": row.get("Object Type", ""),
-                    "FilterType": row.get("Type", ""),
-                    "HiddenFilter": str(bool(row.get("Hidden", False))),
-                    "LockedFilter": str(bool(row.get("Locked", False))),
-                    "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Page Filters
-        df = rpt.list_page_filters()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['page_filters'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "PageId": row.get("Page Name", ""),
-                    "PageName": row.get("Page Display Name", ""),
-                    "displayName": row.get("Filter Name", ""),
-                    "TableName": row.get("Table Name", ""),
-                    "ObjectName": row.get("Object Name", ""),
-                    "ObjectType": row.get("Object Type", ""),
-                    "FilterType": row.get("Type", ""),
-                    "HiddenFilter": str(bool(row.get("Hidden", False))),
-                    "LockedFilter": str(bool(row.get("Locked", False))),
-                    "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Visual Filters
-        df = rpt.list_visual_filters()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['visual_filters'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "PageName": row.get("Page Display Name", ""),
-                    "PageId": row.get("Page Name", ""),
-                    "VisualId": row.get("Visual Name", ""),
-                    "TableName": row.get("Table Name", ""),
-                    "ObjectName": row.get("Object Name", ""),
-                    "ObjectType": row.get("Object Type", ""),
-                    "FilterType": row.get("Type", ""),
-                    "HiddenFilter": str(bool(row.get("Hidden", False))),
-                    "LockedFilter": str(bool(row.get("Locked", False))),
-                    "displayName": row.get("Filter Name", ""),
-                    "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Visual Objects
-        df = rpt.list_visual_objects()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['visual_objects'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "PageName": row.get("Page Display Name", ""),
-                    "PageId": row.get("Page Name", ""),
-                    "VisualId": row.get("Visual Name", ""),
-                    "VisualName": row.get("Visual Name", ""),
-                    "VisualType": "",
-                    "CustomVisualFlag": False,
-                    "TableName": row.get("Table Name", ""),
-                    "ObjectName": row.get("Object Name", ""),
-                    "ObjectType": row.get("Object Type", ""),
-                    "Source": "",
-                    "displayName": row.get("Object Display Name", ""),
-                    "ImplicitMeasure": bool(row.get("Implicit Measure", False)),
-                    "Sparkline": bool(row.get("Sparkline", False)),
-                    "VisualCalc": bool(row.get("Visual Calc", False)),
-                    "Format": row.get("Format", ""),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Report-Level Measures
-        df = rpt.list_report_level_measures()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['report_level_measures'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "TableName": row.get("Table Name", ""),
-                    "ObjectName": row.get("Measure Name", ""),
-                    "ObjectType": "Measure",
-                    "Expression": row.get("Expression", ""),
-                    "HiddenFlag": "False",
-                    "FormatString": row.get("Format String", ""),
-                    "DataType": row.get("Data Type", ""),
-                    "DataCategory": row.get("Data Category", ""),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-        
-        # Visual Interactions
-        df = rpt.list_visual_interactions()
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            for _, row in df.iterrows():
-                result['visual_interactions'].append({
-                    "ReportName": rpt_name,
-                    "ReportID": rpt_id,
-                    "ModelID": model_id,
-                    "PageName": row.get("Page Display Name", ""),
-                    "PageId": row.get("Page Name", ""),
-                    "SourceVisualID": row.get("Source Visual Name", ""),
-                    "TargetVisualID": row.get("Target Visual Name", ""),
-                    "SourceVisualName": row.get("Source Visual Name", ""),
-                    "TargetVisualName": row.get("Target Visual Name", ""),
-                    "TypeID": "",
-                    "Type": row.get("Type", ""),
-                    "ReportDate": report_date,
-                    "WorkspaceName": ws_name
-                })
-    
-    except Exception as e:
-        result['error'] = str(e)
-    
-    return result
-
-# ==============================================================  
-# GET WORKSPACES
-# ==============================================================
-
-workspaces_df = fabric.list_workspaces()
-
-if not SCAN_ALL_WORKSPACES:
-    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
-    if workspaces_df.empty:
-        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
-    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
-
-log(f"Workspace count: {len(workspaces_df)}")
-log("")
-
-# ==============================================================  
-# REPORT METADATA EXTRACTION (with parallel processing)
-# ==============================================================
-
-for ws_row in workspaces_df.itertuples(index=False):
-    ws_name = ws_row.Name
-    log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
-
-    try:
-        reports_df = fabric.list_reports(workspace=ws_name)
-        if reports_df is None or reports_df.empty:
-            log("  No reports found.")
-            continue
-
-        log(f"  Reports found: {len(reports_df)}")
-        
-        # Prepare report tasks
-        report_tasks = []
-        for rpt_row in reports_df.itertuples(index=False):
-            rpt_name = rpt_row.Name
-            rpt_id = rpt_row.Id
-            
-            # Get dataset/model ID - try from list_reports first, then use API as fallback
-            model_id = ""
-            if hasattr(rpt_row, 'DatasetId') and rpt_row.DatasetId is not None:
-                model_id = str(rpt_row.DatasetId)
-            
-            if not model_id:
-                try:
-                    dataset_id, _, _, _ = resolve_dataset_from_report(
-                        report=rpt_id, workspace=ws_name
-                    )
-                    model_id = str(dataset_id) if dataset_id is not None else ""
-                except Exception:
-                    model_id = ""
-            
-            report_tasks.append((rpt_name, rpt_id, model_id))
-        
-        # Process reports in parallel
-        log(f"  Extracting reports in parallel (max {MAX_PARALLEL_WORKERS} workers)...")
-        
-        # Collect results first (thread-safe)
-        report_results = []
-        
-        with ThreadPoolExecutor(max_workers=MAX_PARALLEL_WORKERS) as executor:
-            futures = {
-                executor.submit(extract_report_metadata, ws_name, rpt_name, rpt_id, model_id, REPORT_DATE): rpt_name
-                for rpt_name, rpt_id, model_id in report_tasks
-            }
-            
-            completed = 0
-            for future in as_completed(futures):
-                completed += 1
-                rpt_name = futures[future]
-                try:
-                    result = future.result()
-                    
-                    if result['error']:
-                        log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {result['error']}")
-                    else:
-                        report_results.append(result)
-                        log(f"  [{completed}/{len(report_tasks)}] ✓ Extracted {rpt_name}")
-                except Exception as e:
-                    log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {e}")
-        
-        # Aggregate all results after parallel processing completes (thread-safe)
-        for result in report_results:
-            all_connections.extend(result['connections'])
-            all_pages.extend(result['pages'])
-            all_visuals.extend(result['visuals'])
-            all_bookmarks.extend(result['bookmarks'])
-            all_custom_visuals.extend(result['custom_visuals'])
-            all_report_filters.extend(result['report_filters'])
-            all_page_filters.extend(result['page_filters'])
-            all_visual_filters.extend(result['visual_filters'])
-            all_visual_objects.extend(result['visual_objects'])
-            all_report_level_measures.extend(result['report_level_measures'])
-            all_visual_interactions.extend(result['visual_interactions'])
-
-    except Exception as e:
-        log(f"ERROR accessing workspace {ws_name}: {e}")
-
-# ==============================================================  
-# WRITE TO LAKEHOUSE
-# ==============================================================
-
-log("\n" + "="*80)
-log("Writing output to Lakehouse")
-log("="*80)
-
-def write_table(data, name):
-    """
-    Write data to a Delta table. Schema is inferred from the first row (template).
-    Creates empty table with schema if only template row exists.
-    
-    Args:
-        data: List of dictionaries containing the data (first row is schema template)
-        name: Name of the table
-    """
-    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
-    
-    # Check if we only have the template row (length 1 means just the schema template)
-    if len(data) == 1:
-        log(f"⚠ No data for {name}, creating empty table with schema")
-        # Use template to create empty DataFrame with correct schema
-        df = spark.createDataFrame(pd.DataFrame(data))
-        # Filter out the template row to create truly empty table
-        empty_df = df.filter("1=0")
-        empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
-        log(f"✓ Created empty table: {full_name}\n")
-        return
-
-    # Skip the template row (first row) and create DataFrame with actual data
-    pandas_df = pd.DataFrame(data)
-    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
-    count = actual_df.count()
-
-    log(f"Writing {count} rows → {full_name}")
-
-    actual_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
-
-    log(f"✓ Wrote table: {full_name}\n")
-
-write_table(all_connections, "Connections")
-write_table(all_pages, "Pages")
-write_table(all_visuals, "Visuals")
-write_table(all_bookmarks, "Bookmarks")
-write_table(all_custom_visuals, "CustomVisuals")
-write_table(all_report_filters, "ReportFilters")
-write_table(all_page_filters, "PageFilters")
-write_table(all_visual_filters, "VisualFilters")
-write_table(all_visual_objects, "VisualObjects")
-write_table(all_report_level_measures, "ReportLevelMeasures")
-write_table(all_visual_interactions, "VisualInteractions")
-
-# ==============================================================  
-# END
-# ==============================================================
-
-heartbeat_running = False
-
-log("\n" + "="*80)
-log("PROCESS COMPLETE")
-log(f"Finished at: {datetime.now()}")
-log(f"Total runtime: {elapsed_min():.2f} minutes")
-log("="*80)
-
-
-# In[3]:
-
-
-# ================================
 # FABRIC MODEL METADATA EXTRACTOR (TOMWrapper)
 # WITH AUTO-SCHEMA CREATION
 # ================================
@@ -1956,6 +1438,523 @@ def write_table(data, name):
 
 write_table(all_model_details, "ModelDetail")
 write_table(all_model_dependencies, "ModelDependencies")
+
+# ==============================================================  
+# END
+# ==============================================================
+
+heartbeat_running = False
+
+log("\n" + "="*80)
+log("PROCESS COMPLETE")
+log(f"Finished at: {datetime.now()}")
+log(f"Total runtime: {elapsed_min():.2f} minutes")
+log("="*80)
+
+# In[3]:
+
+
+# ================================
+# FABRIC REPORT METADATA EXTRACTOR (ReportWrapper Only)
+# WITH AUTO-SCHEMA CREATION
+# ================================
+
+# %pip install semantic-link-labs --quiet
+
+import time, re, pandas as pd
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import sempy.fabric as fabric
+from sempy_labs.report import ReportWrapper
+# Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
+from sempy_labs._helper_functions import resolve_dataset_from_report
+
+# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES, MAX_PARALLEL_WORKERS
+
+EXTRACTION_TIMESTAMP = datetime.now()
+REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
+start_time = time.time()
+
+# -----------------------------------
+# Logging helpers
+# -----------------------------------
+def log(msg):
+    print(msg, flush=True)
+
+def elapsed_min():
+    return (time.time() - start_time) / 60
+
+# Heartbeat
+import threading
+heartbeat_running = True
+def heartbeat():
+    while heartbeat_running:
+        time.sleep(10)
+        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
+
+threading.Thread(target=heartbeat, daemon=True).start()
+
+# -----------------------------------
+# Start banner
+# -----------------------------------
+log("="*80)
+log("FABRIC REPORT METADATA EXTRACTION")
+log(f"Started: {EXTRACTION_TIMESTAMP}")
+log("="*80)
+
+# ============================================
+# AUTO-CREATE SCHEMA (LAKEHOUSE)
+# ============================================
+CATALOG = spark.sql("SELECT current_catalog()").first()[0]
+log(f"Using catalog: {CATALOG}")
+
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
+log(f"Ensuring lakehouse schema exists: {schema_name}")
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+log(f"✓ Schema is ready: {schema_name}\n")
+
+
+
+# ==============================================================  
+# COLLECTIONS & SCHEMA TEMPLATES
+# ==============================================================
+# Each collection includes a template row that defines the schema.
+# This ensures empty tables can be created with correct column structure.
+
+all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""}]
+all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""}]
+all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": False, "RowSubTotals": False, "ColumnSubTotals": False, "DataVisual": False, "HasSparkline": False, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
+all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "SuppressData": False, "CurrentPageSelected": False, "ApplyVisualDisplayState": False, "ApplyToAllVisuals": False, "ReportDate": "", "WorkspaceName": ""}]
+all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
+all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": False, "Sparkline": False, "VisualCalc": False, "Format": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
+
+# ==============================================================  
+# PARALLEL REPORT EXTRACTION HELPER
+# ==============================================================
+
+def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
+    """Extract metadata for a single report using ReportWrapper"""
+    result = {
+        'connections': [],
+        'pages': [],
+        'visuals': [],
+        'bookmarks': [],
+        'custom_visuals': [],
+        'report_filters': [],
+        'page_filters': [],
+        'visual_filters': [],
+        'visual_objects': [],
+        'report_level_measures': [],
+        'visual_interactions': [],
+        'error': None
+    }
+    
+    try:
+        rpt = ReportWrapper(report=rpt_name, workspace=ws_name)
+        
+        # Add connection record
+        result['connections'].append({
+            "ReportID": rpt_id,
+            "ModelID": model_id,
+            "ReportDate": report_date,
+            "ReportName": rpt_name,
+            "Type": "",
+            "ServerName": "",
+            "WorkspaceName": ws_name
+        })
+        
+        # Pages
+        df = rpt.list_pages()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['pages'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Id": row.get("Page Name", ""),
+                    "Name": row.get("Page Display Name", ""),
+                    "Number": 0,
+                    "Width": row.get("Width", 0),
+                    "Height": row.get("Height", 0),
+                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "VisualCount": row.get("Visual Count", 0),
+                    "Type": row.get("Display Option", ""),
+                    "DisplayOption": row.get("Display Option", ""),
+                    "DataVisualCount": row.get("Data Visual Count", 0),
+                    "VisibleVisualCount": row.get("Visible Visual Count", 0),
+                    "PageFilterCount": row.get("Page Filter Count", 0),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visuals
+        df = rpt.list_visuals()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visuals'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "Id": row.get("Visual Name", ""),
+                    "Name": row.get("Visual Name", ""),
+                    "Type": row.get("Type", ""),
+                    "DisplayType": row.get("Display Type", ""),
+                    "Title": row.get("Title", ""),
+                    "SubTitle": row.get("Sub Title", ""),
+                    "AltText": row.get("Alt Text", ""),
+                    "TabOrder": row.get("Tab Order", 0),
+                    "CustomVisualFlag": bool(row.get("Custom Visual", False)),
+                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "X": row.get("X", 0),
+                    "Y": row.get("Y", 0),
+                    "Z": row.get("Z", 0),
+                    "Width": row.get("Width", 0),
+                    "Height": row.get("Height", 0),
+                    "ObjectCount": row.get("Visual Object Count", 0),
+                    "VisualFilterCount": row.get("Visual Filter Count", 0),
+                    "DataLimit": row.get("Data Limit", 0),
+                    "Divider": bool(row.get("Divider", False)),
+                    "RowSubTotals": bool(row.get("Row Sub Totals", False)),
+                    "ColumnSubTotals": bool(row.get("Column Sub Totals", False)),
+                    "DataVisual": bool(row.get("Data Visual", False)),
+                    "HasSparkline": bool(row.get("Has Sparkline", False)),
+                    "ParentGroup": "",
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Bookmarks
+        df = rpt.list_bookmarks()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['bookmarks'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Name": row.get("Bookmark Display Name", ""),
+                    "Id": row.get("Bookmark Name", ""),
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
+                    "SuppressData": bool(row.get("Suppress Data", False)),
+                    "CurrentPageSelected": bool(row.get("Current Page Selected", False)),
+                    "ApplyVisualDisplayState": bool(row.get("Apply Visual Display State", False)),
+                    "ApplyToAllVisuals": bool(row.get("Apply To All Visuals", False)),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Custom Visuals
+        df = rpt.list_custom_visuals()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['custom_visuals'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "Name": row.get("Custom Visual Display Name", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Report Filters
+        df = rpt.list_report_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['report_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "displayName": row.get("Filter Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Page Filters
+        df = rpt.list_page_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['page_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageId": row.get("Page Name", ""),
+                    "PageName": row.get("Page Display Name", ""),
+                    "displayName": row.get("Filter Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Filters
+        df = rpt.list_visual_filters()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_filters'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "FilterType": row.get("Type", ""),
+                    "HiddenFilter": str(bool(row.get("Hidden", False))),
+                    "LockedFilter": str(bool(row.get("Locked", False))),
+                    "displayName": row.get("Filter Name", ""),
+                    "HowCreated": row.get("How Created", ""),
+                    "Used": bool(row.get("Used", False)),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Objects
+        df = rpt.list_visual_objects()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_objects'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "VisualId": row.get("Visual Name", ""),
+                    "VisualName": row.get("Visual Name", ""),
+                    "VisualType": "",
+                    "CustomVisualFlag": False,
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Object Name", ""),
+                    "ObjectType": row.get("Object Type", ""),
+                    "Source": "",
+                    "displayName": row.get("Object Display Name", ""),
+                    "ImplicitMeasure": bool(row.get("Implicit Measure", False)),
+                    "Sparkline": bool(row.get("Sparkline", False)),
+                    "VisualCalc": bool(row.get("Visual Calc", False)),
+                    "Format": row.get("Format", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Report-Level Measures
+        df = rpt.list_report_level_measures()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['report_level_measures'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "TableName": row.get("Table Name", ""),
+                    "ObjectName": row.get("Measure Name", ""),
+                    "ObjectType": "Measure",
+                    "Expression": row.get("Expression", ""),
+                    "HiddenFlag": "False",
+                    "FormatString": row.get("Format String", ""),
+                    "DataType": row.get("Data Type", ""),
+                    "DataCategory": row.get("Data Category", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+        
+        # Visual Interactions
+        df = rpt.list_visual_interactions()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            for _, row in df.iterrows():
+                result['visual_interactions'].append({
+                    "ReportName": rpt_name,
+                    "ReportID": rpt_id,
+                    "ModelID": model_id,
+                    "PageName": row.get("Page Display Name", ""),
+                    "PageId": row.get("Page Name", ""),
+                    "SourceVisualID": row.get("Source Visual Name", ""),
+                    "TargetVisualID": row.get("Target Visual Name", ""),
+                    "SourceVisualName": row.get("Source Visual Name", ""),
+                    "TargetVisualName": row.get("Target Visual Name", ""),
+                    "TypeID": "",
+                    "Type": row.get("Type", ""),
+                    "ReportDate": report_date,
+                    "WorkspaceName": ws_name
+                })
+    
+    except Exception as e:
+        result['error'] = str(e)
+    
+    return result
+
+# ==============================================================  
+# GET WORKSPACES
+# ==============================================================
+
+workspaces_df = fabric.list_workspaces()
+
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
+    if workspaces_df.empty:
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
+
+log(f"Workspace count: {len(workspaces_df)}")
+log("")
+
+# ==============================================================  
+# REPORT METADATA EXTRACTION (with parallel processing)
+# ==============================================================
+
+for ws_row in workspaces_df.itertuples(index=False):
+    ws_name = ws_row.Name
+    log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
+
+    try:
+        reports_df = fabric.list_reports(workspace=ws_name)
+        if reports_df is None or reports_df.empty:
+            log("  No reports found.")
+            continue
+
+        log(f"  Reports found: {len(reports_df)}")
+        
+        # Prepare report tasks
+        report_tasks = []
+        for rpt_row in reports_df.itertuples(index=False):
+            rpt_name = rpt_row.Name
+            rpt_id = rpt_row.Id
+            
+            # Get dataset/model ID - try from list_reports first, then use API as fallback
+            model_id = ""
+            if hasattr(rpt_row, 'DatasetId') and rpt_row.DatasetId is not None:
+                model_id = str(rpt_row.DatasetId)
+            
+            if not model_id:
+                try:
+                    dataset_id, _, _, _ = resolve_dataset_from_report(
+                        report=rpt_id, workspace=ws_name
+                    )
+                    model_id = str(dataset_id) if dataset_id is not None else ""
+                except Exception:
+                    model_id = ""
+            
+            report_tasks.append((rpt_name, rpt_id, model_id))
+        
+        # Process reports in parallel
+        log(f"  Extracting reports in parallel (max {MAX_PARALLEL_WORKERS} workers)...")
+        
+        # Collect results first (thread-safe)
+        report_results = []
+        
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL_WORKERS) as executor:
+            futures = {
+                executor.submit(extract_report_metadata, ws_name, rpt_name, rpt_id, model_id, REPORT_DATE): rpt_name
+                for rpt_name, rpt_id, model_id in report_tasks
+            }
+            
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                rpt_name = futures[future]
+                try:
+                    result = future.result()
+                    
+                    if result['error']:
+                        log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {result['error']}")
+                    else:
+                        report_results.append(result)
+                        log(f"  [{completed}/{len(report_tasks)}] ✓ Extracted {rpt_name}")
+                except Exception as e:
+                    log(f"  [{completed}/{len(report_tasks)}] ERROR extracting {rpt_name}: {e}")
+        
+        # Aggregate all results after parallel processing completes (thread-safe)
+        for result in report_results:
+            all_connections.extend(result['connections'])
+            all_pages.extend(result['pages'])
+            all_visuals.extend(result['visuals'])
+            all_bookmarks.extend(result['bookmarks'])
+            all_custom_visuals.extend(result['custom_visuals'])
+            all_report_filters.extend(result['report_filters'])
+            all_page_filters.extend(result['page_filters'])
+            all_visual_filters.extend(result['visual_filters'])
+            all_visual_objects.extend(result['visual_objects'])
+            all_report_level_measures.extend(result['report_level_measures'])
+            all_visual_interactions.extend(result['visual_interactions'])
+
+    except Exception as e:
+        log(f"ERROR accessing workspace {ws_name}: {e}")
+
+# ==============================================================  
+# WRITE TO LAKEHOUSE
+# ==============================================================
+
+log("\n" + "="*80)
+log("Writing output to Lakehouse")
+log("="*80)
+
+def write_table(data, name):
+    """
+    Write data to a Delta table. Schema is inferred from the first row (template).
+    Creates empty table with schema if only template row exists.
+    
+    Args:
+        data: List of dictionaries containing the data (first row is schema template)
+        name: Name of the table
+    """
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    
+    # Check if we only have the template row (length 1 means just the schema template)
+    if len(data) == 1:
+        log(f"⚠ No data for {name}, creating empty table with schema")
+        # Use template to create empty DataFrame with correct schema
+        df = spark.createDataFrame(pd.DataFrame(data))
+        # Filter out the template row to create truly empty table
+        empty_df = df.filter("1=0")
+        empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
+        log(f"✓ Created empty table: {full_name}\n")
+        return
+
+    # Skip the template row (first row) and create DataFrame with actual data
+    pandas_df = pd.DataFrame(data)
+    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
+    count = actual_df.count()
+
+    log(f"Writing {count} rows → {full_name}")
+
+    actual_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
+
+    log(f"✓ Wrote table: {full_name}\n")
+
+write_table(all_connections, "Connections")
+write_table(all_pages, "Pages")
+write_table(all_visuals, "Visuals")
+write_table(all_bookmarks, "Bookmarks")
+write_table(all_custom_visuals, "CustomVisuals")
+write_table(all_report_filters, "ReportFilters")
+write_table(all_page_filters, "PageFilters")
+write_table(all_visual_filters, "VisualFilters")
+write_table(all_visual_objects, "VisualObjects")
+write_table(all_report_level_measures, "ReportLevelMeasures")
+write_table(all_visual_interactions, "VisualInteractions")
 
 # ==============================================================  
 # END
