@@ -509,7 +509,7 @@ for ws_info in workspaces_info:
     # -------------------- FABRIC ITEMS --------------------
     try:
         log(f"  Fetching Fabric items...")
-        items_url = f"v1.0/workspaces/{ws_id}/items"
+        items_url = f"v1/workspaces/{ws_id}/items"
         response = client.get(items_url)
         
         if response.status_code == 200:
