@@ -339,7 +339,7 @@ def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
                         "DatasetRefreshScheduleTime": time if time else ""
                     })
     except Exception as e:
-        # Silently continue if refresh schedule is not available for this dataset
+        # Log error but continue - not all datasets have refresh schedules configured
         errors.append(f"refresh schedule: {e}")
     
     return sources, refreshes, schedules, errors
