@@ -111,14 +111,15 @@ print(f"  Parallel Workers: {MAX_PARALLEL_WORKERS}")
 # 3. Datasets - dataset metadata with renamed columns
 # 4. DatasetSourcesInfo - dataset data sources
 # 5. DatasetRefreshHistory - dataset refresh history
-# 6. Dataflows - dataflow metadata with renamed columns
-# 7. DataflowLineage - dataflow lineage (upstream dataflows)
-# 8. DataflowSourcesInfo - dataflow data sources
-# 9. DataflowRefreshHistory - dataflow refresh history
-# 10. Reports - report metadata with renamed columns
-# 11. ReportPages - report pages with renamed columns
-# 12. Apps - Power BI apps
-# 13. AppReports - reports within apps
+# 6. DatasetRefreshSchedule - dataset refresh schedule with day/time combinations
+# 7. Dataflows - dataflow metadata with renamed columns
+# 8. DataflowLineage - dataflow lineage (upstream dataflows)
+# 9. DataflowSourcesInfo - dataflow data sources
+# 10. DataflowRefreshHistory - dataflow refresh history
+# 11. Reports - report metadata with renamed columns
+# 12. ReportPages - report pages with renamed columns
+# 13. Apps - Power BI apps
+# 14. AppReports - reports within apps
 #
 # All column names are renamed to match the PowerShell script output.
 #
@@ -193,6 +194,7 @@ fabric_items_info = []
 datasets_info = []
 dataset_sources_info = []
 dataset_refresh_history = []
+dataset_refresh_schedule = []
 dataflows_info = []
 dataflow_lineage = []
 dataflow_sources_info = []
@@ -216,6 +218,7 @@ SAMPLE_ROWS = {
     "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": False, "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
     "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
     "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
+    "DatasetRefreshSchedule": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshScheduleEnabled": False, "DatasetRefreshScheduleLocalTimeZoneId": "", "DatasetRefreshScheduleNotifyOption": "", "DatasetRefreshScheduleDay": "", "DatasetRefreshScheduleTime": ""},
     "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
     "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
     "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
@@ -254,9 +257,10 @@ def serialize_json(obj):
 MAX_WORKERS = MAX_PARALLEL_WORKERS
 
 def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
-    """Fetch dataset sources and refresh history in parallel"""
+    """Fetch dataset sources, refresh history, and refresh schedule in parallel"""
     sources = []
     refreshes = []
+    schedules = []
     errors = []
     
     # Fetch dataset sources
@@ -299,7 +303,46 @@ def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
     except Exception as e:
         errors.append(f"refresh history: {e}")
     
-    return sources, refreshes, errors
+    # Fetch dataset refresh schedule
+    try:
+        schedule_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshSchedule"
+        response = client.get(schedule_url)
+        if response.status_code == 200:
+            schedule_data = response.json()
+            
+            # Get base properties
+            enabled = schedule_data.get("enabled", False)
+            timezone = schedule_data.get("localTimeZoneId", "")
+            notify_option = schedule_data.get("notifyOption", "")
+            
+            # Get days and times arrays, with fallback to [None] if empty/missing
+            days = schedule_data.get("days", [])
+            if not days:
+                days = [None]
+            
+            times = schedule_data.get("times", [])
+            if not times:
+                times = [None]
+            
+            # Create separate rows for each day-time combination (cross join)
+            for day in days:
+                for time in times:
+                    schedules.append({
+                        "WorkspaceId": ws_id,
+                        "WorkspaceName": ws_name,
+                        "DatasetId": dataset_id,
+                        "DatasetName": dataset_name,
+                        "DatasetRefreshScheduleEnabled": enabled,
+                        "DatasetRefreshScheduleLocalTimeZoneId": timezone,
+                        "DatasetRefreshScheduleNotifyOption": notify_option,
+                        "DatasetRefreshScheduleDay": day if day else "",
+                        "DatasetRefreshScheduleTime": time if time else ""
+                    })
+    except Exception as e:
+        # Silently continue if refresh schedule is not available for this dataset
+        errors.append(f"refresh schedule: {e}")
+    
+    return sources, refreshes, schedules, errors
 
 def fetch_dataflow_details(client, ws_id, ws_name, dataflow_id, dataflow_name):
     """Fetch dataflow sources and refresh history in parallel"""
@@ -430,9 +473,10 @@ for ws_info in workspaces_info:
                 }
                 for future in as_completed(futures):
                     try:
-                        sources, refreshes, errors = future.result()
+                        sources, refreshes, schedules, errors = future.result()
                         dataset_sources_info.extend(sources)
                         dataset_refresh_history.extend(refreshes)
+                        dataset_refresh_schedule.extend(schedules)
                         if errors:
                             ds_id, ds_name = futures[future]
                             for err in errors:
@@ -737,6 +781,7 @@ write_table(fabric_items_info, "FabricItems", SAMPLE_ROWS.get("FabricItems"))
 write_table(datasets_info, "Datasets", SAMPLE_ROWS.get("Datasets"))
 write_table(dataset_sources_info, "DatasetSourcesInfo", SAMPLE_ROWS.get("DatasetSourcesInfo"))
 write_table(dataset_refresh_history, "DatasetRefreshHistory", SAMPLE_ROWS.get("DatasetRefreshHistory"))
+write_table(dataset_refresh_schedule, "DatasetRefreshSchedule", SAMPLE_ROWS.get("DatasetRefreshSchedule"))
 write_table(dataflows_info, "Dataflows", SAMPLE_ROWS.get("Dataflows"))
 write_table(dataflow_lineage, "DataflowLineage", SAMPLE_ROWS.get("DataflowLineage"))
 write_table(dataflow_sources_info, "DataflowSourcesInfo", SAMPLE_ROWS.get("DataflowSourcesInfo"))
