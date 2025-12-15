@@ -111,14 +111,15 @@ print(f"  Parallel Workers: {MAX_PARALLEL_WORKERS}")
 # 3. Datasets - dataset metadata with renamed columns
 # 4. DatasetSourcesInfo - dataset data sources
 # 5. DatasetRefreshHistory - dataset refresh history
-# 6. Dataflows - dataflow metadata with renamed columns
-# 7. DataflowLineage - dataflow lineage (upstream dataflows)
-# 8. DataflowSourcesInfo - dataflow data sources
-# 9. DataflowRefreshHistory - dataflow refresh history
-# 10. Reports - report metadata with renamed columns
-# 11. ReportPages - report pages with renamed columns
-# 12. Apps - Power BI apps
-# 13. AppReports - reports within apps
+# 6. DatasetRefreshSchedule - dataset refresh schedule with day/time combinations
+# 7. Dataflows - dataflow metadata with renamed columns
+# 8. DataflowLineage - dataflow lineage (upstream dataflows)
+# 9. DataflowSourcesInfo - dataflow data sources
+# 10. DataflowRefreshHistory - dataflow refresh history
+# 11. Reports - report metadata with renamed columns
+# 12. ReportPages - report pages with renamed columns
+# 13. Apps - Power BI apps
+# 14. AppReports - reports within apps
 #
 # All column names are renamed to match the PowerShell script output.
 #
@@ -193,6 +194,7 @@ fabric_items_info = []
 datasets_info = []
 dataset_sources_info = []
 dataset_refresh_history = []
+dataset_refresh_schedule = []
 dataflows_info = []
 dataflow_lineage = []
 dataflow_sources_info = []
@@ -213,9 +215,10 @@ dataflow_name_lookup = {}
 SAMPLE_ROWS = {
     "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
     "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
-    "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": False, "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
+    "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": "", "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
     "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
     "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
+    "DatasetRefreshSchedule": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshScheduleEnabled": "", "DatasetRefreshScheduleLocalTimeZoneId": "", "DatasetRefreshScheduleNotifyOption": "", "DatasetRefreshScheduleDay": "", "DatasetRefreshScheduleTime": ""},
     "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
     "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
     "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
@@ -223,7 +226,7 @@ SAMPLE_ROWS = {
     "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
     "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
-    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": False, "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""}
+    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""}
 }
 
 # ==============================================================  
@@ -254,9 +257,10 @@ def serialize_json(obj):
 MAX_WORKERS = MAX_PARALLEL_WORKERS
 
 def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
-    """Fetch dataset sources and refresh history in parallel"""
+    """Fetch dataset sources, refresh history, and refresh schedule in parallel"""
     sources = []
     refreshes = []
+    schedules = []
     errors = []
     
     # Fetch dataset sources
@@ -299,7 +303,46 @@ def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
     except Exception as e:
         errors.append(f"refresh history: {e}")
     
-    return sources, refreshes, errors
+    # Fetch dataset refresh schedule
+    try:
+        schedule_url = f"v1.0/myorg/groups/{ws_id}/datasets/{dataset_id}/refreshSchedule"
+        response = client.get(schedule_url)
+        if response.status_code == 200:
+            schedule_data = response.json()
+            
+            # Get base properties
+            enabled = schedule_data.get("enabled", False)
+            timezone = schedule_data.get("localTimeZoneId", "")
+            notify_option = schedule_data.get("notifyOption", "")
+            
+            # Get days and times arrays, with fallback to [None] if empty/missing
+            days = schedule_data.get("days", [])
+            if not days:
+                days = [None]
+            
+            times = schedule_data.get("times", [])
+            if not times:
+                times = [None]
+            
+            # Create separate rows for each day-time combination (cross join)
+            for day in days:
+                for time in times:
+                    schedules.append({
+                        "WorkspaceId": ws_id,
+                        "WorkspaceName": ws_name,
+                        "DatasetId": dataset_id,
+                        "DatasetName": dataset_name,
+                        "DatasetRefreshScheduleEnabled": str(bool(enabled)),
+                        "DatasetRefreshScheduleLocalTimeZoneId": timezone,
+                        "DatasetRefreshScheduleNotifyOption": notify_option,
+                        "DatasetRefreshScheduleDay": day if day else "",
+                        "DatasetRefreshScheduleTime": time if time else ""
+                    })
+    except Exception as e:
+        # Log error but continue - not all datasets have refresh schedules configured
+        errors.append(f"refresh schedule: {e}")
+    
+    return sources, refreshes, schedules, errors
 
 def fetch_dataflow_details(client, ws_id, ws_name, dataflow_id, dataflow_name):
     """Fetch dataflow sources and refresh history in parallel"""
@@ -414,7 +457,7 @@ for ws_info in workspaces_info:
                     "DatasetDescription": safe_get(ds_row, "Description"),
                     "DatasetWebUrl": safe_get(ds_row, "Web URL"),
                     "DatasetConfiguredBy": safe_get(ds_row, "Configured By"),
-                    "DatasetIsRefreshable": safe_get(ds_row, "Is Refreshable", False),
+                    "DatasetIsRefreshable": str(bool(safe_get(ds_row, "Is Refreshable", False))),
                     "DatasetTargetStorageMode": safe_get(ds_row, "Target Storage Mode"),
                     "DatasetCreatedDate": safe_get(ds_row, "Created Date")
                 })
@@ -430,9 +473,10 @@ for ws_info in workspaces_info:
                 }
                 for future in as_completed(futures):
                     try:
-                        sources, refreshes, errors = future.result()
+                        sources, refreshes, schedules, errors = future.result()
                         dataset_sources_info.extend(sources)
                         dataset_refresh_history.extend(refreshes)
+                        dataset_refresh_schedule.extend(schedules)
                         if errors:
                             ds_id, ds_name = futures[future]
                             for err in errors:
@@ -645,7 +689,7 @@ try:
                                 "ReportName": report.get("name", ""),
                                 "AppReportWebUrl": report.get("webUrl", ""),
                                 "AppReportEmbedUrl": report.get("embedUrl", ""),
-                                "AppReportIsOwnedByMe": report.get("isOwnedByMe", False),
+                                "AppReportIsOwnedByMe": str(bool(report.get("isOwnedByMe", False))),
                                 "AppReportDatasetId": report.get("datasetId", ""),
                                 "ReportId": report.get("originalReportObjectId", ""),
                                 "WorkspaceName": app_workspace_name
@@ -737,6 +781,7 @@ write_table(fabric_items_info, "FabricItems", SAMPLE_ROWS.get("FabricItems"))
 write_table(datasets_info, "Datasets", SAMPLE_ROWS.get("Datasets"))
 write_table(dataset_sources_info, "DatasetSourcesInfo", SAMPLE_ROWS.get("DatasetSourcesInfo"))
 write_table(dataset_refresh_history, "DatasetRefreshHistory", SAMPLE_ROWS.get("DatasetRefreshHistory"))
+write_table(dataset_refresh_schedule, "DatasetRefreshSchedule", SAMPLE_ROWS.get("DatasetRefreshSchedule"))
 write_table(dataflows_info, "Dataflows", SAMPLE_ROWS.get("Dataflows"))
 write_table(dataflow_lineage, "DataflowLineage", SAMPLE_ROWS.get("DataflowLineage"))
 write_table(dataflow_sources_info, "DataflowSourcesInfo", SAMPLE_ROWS.get("DataflowSourcesInfo"))
@@ -1523,14 +1568,14 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # This ensures empty tables can be created with correct column structure.
 
 all_connections = [{"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""}]
-all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": False, "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""}]
-all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": False, "HiddenFlag": False, "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": False, "RowSubTotals": False, "ColumnSubTotals": False, "DataVisual": False, "HasSparkline": False, "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
-all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": False, "SuppressData": False, "CurrentPageSelected": False, "ApplyVisualDisplayState": False, "ApplyToAllVisuals": False, "ReportDate": "", "WorkspaceName": ""}]
+all_pages = [{"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": "", "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""}]
+all_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": "", "HiddenFlag": "", "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": "", "RowSubTotals": "", "ColumnSubTotals": "", "DataVisual": "", "HasSparkline": "", "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""}]
+all_bookmarks = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "Id": "", "PageName": "", "PageId": "", "VisualId": "", "VisualHiddenFlag": "", "SuppressData": "", "CurrentPageSelected": "", "ApplyVisualDisplayState": "", "ApplyToAllVisuals": "", "ReportDate": "", "WorkspaceName": ""}]
 all_custom_visuals = [{"ReportName": "", "ReportID": "", "ModelID": "", "Name": "", "ReportDate": "", "WorkspaceName": ""}]
-all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "HowCreated": "", "Used": False, "ReportDate": "", "WorkspaceName": ""}]
-all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": False, "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": False, "Sparkline": False, "VisualCalc": False, "Format": "", "ReportDate": "", "WorkspaceName": ""}]
+all_report_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": "", "ReportDate": "", "WorkspaceName": ""}]
+all_page_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageId": "", "PageName": "", "displayName": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "HowCreated": "", "Used": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_filters = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "TableName": "", "ObjectName": "", "ObjectType": "", "FilterType": "", "HiddenFilter": "", "LockedFilter": "", "displayName": "", "HowCreated": "", "Used": "", "ReportDate": "", "WorkspaceName": ""}]
+all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": "", "Sparkline": "", "VisualCalc": "", "Format": "", "ReportDate": "", "WorkspaceName": ""}]
 all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""}]
 all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
 
@@ -1582,7 +1627,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "Number": 0,
                     "Width": row.get("Width", 0),
                     "Height": row.get("Height", 0),
-                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "HiddenFlag": str(bool(row.get("Hidden", False))),
                     "VisualCount": row.get("Visual Count", 0),
                     "Type": row.get("Display Option", ""),
                     "DisplayOption": row.get("Display Option", ""),
@@ -1611,8 +1656,8 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "SubTitle": row.get("Sub Title", ""),
                     "AltText": row.get("Alt Text", ""),
                     "TabOrder": row.get("Tab Order", 0),
-                    "CustomVisualFlag": bool(row.get("Custom Visual", False)),
-                    "HiddenFlag": bool(row.get("Hidden", False)),
+                    "CustomVisualFlag": str(bool(row.get("Custom Visual", False))),
+                    "HiddenFlag": str(bool(row.get("Hidden", False))),
                     "X": row.get("X", 0),
                     "Y": row.get("Y", 0),
                     "Z": row.get("Z", 0),
@@ -1621,11 +1666,11 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "ObjectCount": row.get("Visual Object Count", 0),
                     "VisualFilterCount": row.get("Visual Filter Count", 0),
                     "DataLimit": row.get("Data Limit", 0),
-                    "Divider": bool(row.get("Divider", False)),
-                    "RowSubTotals": bool(row.get("Row Sub Totals", False)),
-                    "ColumnSubTotals": bool(row.get("Column Sub Totals", False)),
-                    "DataVisual": bool(row.get("Data Visual", False)),
-                    "HasSparkline": bool(row.get("Has Sparkline", False)),
+                    "Divider": str(bool(row.get("Divider", False))),
+                    "RowSubTotals": str(bool(row.get("Row Sub Totals", False))),
+                    "ColumnSubTotals": str(bool(row.get("Column Sub Totals", False))),
+                    "DataVisual": str(bool(row.get("Data Visual", False))),
+                    "HasSparkline": str(bool(row.get("Has Sparkline", False))),
                     "ParentGroup": "",
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
@@ -1644,11 +1689,11 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "PageName": row.get("Page Display Name", ""),
                     "PageId": row.get("Page Name", ""),
                     "VisualId": row.get("Visual Name", ""),
-                    "VisualHiddenFlag": bool(row.get("Visual Hidden", False)),
-                    "SuppressData": bool(row.get("Suppress Data", False)),
-                    "CurrentPageSelected": bool(row.get("Current Page Selected", False)),
-                    "ApplyVisualDisplayState": bool(row.get("Apply Visual Display State", False)),
-                    "ApplyToAllVisuals": bool(row.get("Apply To All Visuals", False)),
+                    "VisualHiddenFlag": str(bool(row.get("Visual Hidden", False))),
+                    "SuppressData": str(bool(row.get("Suppress Data", False))),
+                    "CurrentPageSelected": str(bool(row.get("Current Page Selected", False))),
+                    "ApplyVisualDisplayState": str(bool(row.get("Apply Visual Display State", False))),
+                    "ApplyToAllVisuals": str(bool(row.get("Apply To All Visuals", False))),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1682,7 +1727,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "HiddenFilter": str(bool(row.get("Hidden", False))),
                     "LockedFilter": str(bool(row.get("Locked", False))),
                     "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
+                    "Used": str(bool(row.get("Used", False))),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1705,7 +1750,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "HiddenFilter": str(bool(row.get("Hidden", False))),
                     "LockedFilter": str(bool(row.get("Locked", False))),
                     "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
+                    "Used": str(bool(row.get("Used", False))),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1729,7 +1774,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "LockedFilter": str(bool(row.get("Locked", False))),
                     "displayName": row.get("Filter Name", ""),
                     "HowCreated": row.get("How Created", ""),
-                    "Used": bool(row.get("Used", False)),
+                    "Used": str(bool(row.get("Used", False))),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
                 })
@@ -1747,15 +1792,15 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "VisualId": row.get("Visual Name", ""),
                     "VisualName": row.get("Visual Name", ""),
                     "VisualType": "",
-                    "CustomVisualFlag": False,
+                    "CustomVisualFlag": str(bool(False)),
                     "TableName": row.get("Table Name", ""),
                     "ObjectName": row.get("Object Name", ""),
                     "ObjectType": row.get("Object Type", ""),
                     "Source": "",
                     "displayName": row.get("Object Display Name", ""),
-                    "ImplicitMeasure": bool(row.get("Implicit Measure", False)),
-                    "Sparkline": bool(row.get("Sparkline", False)),
-                    "VisualCalc": bool(row.get("Visual Calc", False)),
+                    "ImplicitMeasure": str(bool(row.get("Implicit Measure", False))),
+                    "Sparkline": str(bool(row.get("Sparkline", False))),
+                    "VisualCalc": str(bool(row.get("Visual Calc", False))),
                     "Format": row.get("Format", ""),
                     "ReportDate": report_date,
                     "WorkspaceName": ws_name
