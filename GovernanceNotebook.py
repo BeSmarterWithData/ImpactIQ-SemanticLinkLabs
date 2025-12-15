@@ -1792,7 +1792,7 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                     "VisualId": row.get("Visual Name", ""),
                     "VisualName": row.get("Visual Name", ""),
                     "VisualType": "",
-                    "CustomVisualFlag": "False",
+                    "CustomVisualFlag": str(bool(False)),
                     "TableName": row.get("Table Name", ""),
                     "ObjectName": row.get("Object Name", ""),
                     "ObjectType": row.get("Object Type", ""),
