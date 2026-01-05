@@ -7,7 +7,7 @@
   <em>Semantic Link Labs Edition</em>
 </p>
 
-# Impact Analysis and Governance for Power BI + Microsoft Fabric
+# Impact Analysis and Governance for Power BI + Fabric
 
 ## What It Does
 This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI & Fabric Governance** solution. All of the metadata is outputted to a Fabric Lakehouse and can be scheduled for automated updates.
