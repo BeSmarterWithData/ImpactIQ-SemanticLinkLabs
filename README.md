@@ -12,9 +12,9 @@
 ## What It Does
 This provides a quick and automated way to identify where and how specific fields, measures, and tables are used across Power BI reports in all workspaces by analyzing the Report Layer. It also breaks down the details of your models, reports, and dataflows for easy review, giving you an all-in-one **Power BI & Fabric Governance** solution. All of the metadata is outputted to a Fabric Lakehouse and can be scheduled for automated updates.
 
->*This is the Semantic Link Labs Python & Fabric Lakehouse edition. It requires a Fabric Workspace. If looking for Impact IQ's One-Click, Designed for Everyone edition that runs on any computer, provides report, model, and dataflow backups, and leverages the Power BI + Fabric Service and REST API across all Workspaces, check out: https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution*
+>*This is the Semantic Link Labs Python & Fabric Lakehouse edition. It requires a Fabric Workspace. If looking for Impact IQ's One-Click, Designed for Everyone edition that runs on any computer, provides report, model, and dataflow backups, and leverages the Power BI + Fabric Service and REST API across all Workspaces, check out: https://github.com/BeSmarterWithData/ImpactIQ*
 
->*Have specific Reports and/or Models downloaded you want to analyze? Don't have direct access to the Workspace but have the PBIX? Check out Impact IQ's Local edition here: https://github.com/chris1642/Local-Power-BI-Impact-Analysis-Governance*
+>*Have specific Reports and/or Models downloaded you want to analyze? Don't have direct access to the Workspace but have the PBIX? Check out Impact IQ's Local edition here: https://github.com/BeSmarterWithData/ImpactIQ-Local*
 
 ### Key Features:
 - **Impact Analysis**: Fully understand the downstream impact of data model changes, ensuring you don’t accidentally break visuals or dashboards—especially when reports connected to a model span multiple workspaces.
