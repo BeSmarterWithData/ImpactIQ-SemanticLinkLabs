@@ -1,0 +1,6 @@
+{
+  "displayName": "Governance Analyzer",
+  "description": "Analyze Power BI reports, semantic models, and dataflows for impact, usage, and governance across your Fabric environment",
+  "documentationUrl": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs",
+  "previewImageUrl": "assets/images/GovernanceAnalyzerItem_Icon.png"
+}

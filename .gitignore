@@ -25,3 +25,21 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Node.js / Fabric Workload
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Workload build artifacts
+Workload/build/
+Workload/dist/
+Workload/.env.dev
+Workload/.env.test
+Workload/.env.prod
+*.nupkg
+
+# Webpack
+.webpack/
