@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Button,
   Text,
@@ -7,12 +7,14 @@ import {
   Divider,
   makeStyles,
   tokens,
+  Spinner,
 } from '@fluentui/react-components';
 import {
   DatabaseRegular,
   DocumentTextRegular,
   ChartMultipleRegular,
 } from '@fluentui/react-icons';
+import { createGovernanceClient, GovernanceSummary } from '../../clients/GovernanceClient';
 
 const useStyles = makeStyles({
   container: {
@@ -80,14 +82,58 @@ export const GovernanceAnalyzerItemEditor: React.FC<GovernanceAnalyzerItemEditor
 }) => {
   const styles = useStyles();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [results, setResults] = useState<GovernanceSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleStartAnalysis = () => {
+  const client = workspaceId 
+    ? createGovernanceClient(workspaceId, 'PowerBIGovernance')
+    : null;
+
+  useEffect(() => {
+    // Load existing results on mount
+    if (client) {
+      loadResults();
+    }
+  }, [workspaceId]);
+
+  const loadResults = async () => {
+    if (!client) return;
+    
+    setIsLoading(true);
+    try {
+      const data = await client.getResults();
+      setResults(data.summary);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load results');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartAnalysis = async () => {
+    if (!client) {
+      alert('Workspace ID is required to start analysis');
+      return;
+    }
+
     setIsAnalyzing(true);
-    // TODO: Integrate with GovernanceNotebook.py functionality
-    setTimeout(() => {
+    setError(null);
+    
+    try {
+      const result = await client.triggerAnalysis();
+      alert(`Analysis started successfully! Run ID: ${result.runId}`);
+      
+      // Optionally reload results after a delay
+      setTimeout(() => {
+        loadResults();
+        setIsAnalyzing(false);
+      }, 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start analysis');
       setIsAnalyzing(false);
-      alert('Analysis would start here. Integration with GovernanceNotebook.py pending.');
-    }, 1000);
+    }
   };
 
   return (
@@ -154,13 +200,46 @@ export const GovernanceAnalyzerItemEditor: React.FC<GovernanceAnalyzerItemEditor
             <li>The GovernanceNotebook configured and ready to run</li>
           </ul>
         </Text>
+
+        {error && (
+          <Text style={{ color: 'red', marginTop: '10px' }}>
+            Error: {error}
+          </Text>
+        )}
+
+        {isLoading && (
+          <div style={{ marginTop: '10px' }}>
+            <Spinner label="Loading results..." />
+          </div>
+        )}
+
+        {results && (
+          <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+            <Text className={styles.featureTitle}>Latest Results</Text>
+            <ul>
+              <li>Total Reports: {results.totalReports}</li>
+              <li>Total Models: {results.totalModels}</li>
+              <li>Total Dataflows: {results.totalDataflows}</li>
+              <li>Unused Objects: {results.unusedObjects}</li>
+              <li>Broken Visuals: {results.brokenVisuals}</li>
+            </ul>
+          </div>
+        )}
+
         <div className={styles.buttonGroup}>
           <Button
             appearance="primary"
             onClick={handleStartAnalysis}
-            disabled={isAnalyzing}
+            disabled={isAnalyzing || !client}
           >
             {isAnalyzing ? 'Analyzing...' : 'Start Analysis'}
+          </Button>
+          <Button
+            appearance="secondary"
+            onClick={loadResults}
+            disabled={isLoading || !client}
+          >
+            Refresh Results
           </Button>
           <Button
             appearance="secondary"
