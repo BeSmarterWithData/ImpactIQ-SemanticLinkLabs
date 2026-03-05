@@ -1,0 +1,13 @@
+{
+  "ImpactIQ_Governance_Workload": "ImpactIQ Governance Workload",
+  "Workload_Display_Name": "ImpactIQ Governance",
+  "Workload_Full_Display_Name": "ImpactIQ Semantic Link Labs - Power BI & Fabric Governance",
+  "Workload_Description": "Automated Power BI and Fabric governance solution with impact analysis and metadata extraction",
+  "Workload_Hub_Slogan": "Be smarter with every change",
+  "Workload_Hub_Description": "ImpactIQ provides comprehensive governance for Power BI and Fabric environments. Automatically analyze impact of changes, identify unused objects, discover broken visuals, and maintain complete visibility across all workspaces. Built on Semantic Link Labs for fast, reliable metadata extraction into Fabric Lakehouses.",
+  "Workload_Hub_GetStarted_1_Title": "Quick Start Guide",
+  "Workload_Hub_GetStarted_1_Sub_Title": "Get up and running in minutes",
+  "Workload_Hub_GetStarted_1_Description": "Follow our step-by-step guide to set up ImpactIQ in your Fabric workspace. Create a Governance Analyzer item, connect to a Lakehouse, and start analyzing your Power BI environment immediately.",
+  "GovernanceAnalyzerItem_DisplayName": "Governance Analyzer",
+  "GovernanceAnalyzerItem_Description": "Analyze Power BI reports and semantic models for impact, usage, and governance"
+}

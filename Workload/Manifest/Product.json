@@ -1,0 +1,78 @@
+{
+    "name": "Product",
+    "version": "1.0.0",
+    "displayName": "ImpactIQ Governance Workload",
+    "fullDisplayName": "ImpactIQ Semantic Link Labs - Power BI & Fabric Governance",
+    "description": "Automated Power BI and Fabric governance solution with impact analysis and metadata extraction",
+    "favicon": "assets/images/Workload_Icon.png",
+    "icon": {
+      "name": "assets/images/Workload_Icon.png"
+    },
+    "homePage": {
+      "learningMaterials": [
+        {
+          "title": "Getting Started with ImpactIQ",
+          "introduction": "Quick start guide for governance and impact analysis",
+          "description": "Learn how to set up ImpactIQ for automated Power BI governance, impact analysis, and metadata extraction across your Fabric environment.",
+          "image": "assets/images/Workload_Hub_GetStarted_1.png",
+          "link": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs"
+        }
+      ],
+      "newSection": {
+        "customActions": []
+      },
+      "recommendedItemTypes": [
+        "GovernanceAnalyzer"
+      ]
+    },
+    "createExperience": {
+      "description": "Create and manage Power BI governance and impact analysis items",
+      "cards": [
+        {
+          "title": "Governance Analyzer",
+          "description": "Analyze Power BI reports and semantic models for impact, usage, and governance",
+          "icon": {
+            "name": "assets/images/GovernanceAnalyzerItem_Icon.png"
+          },
+          "icon_small": {
+            "name": "assets/images/GovernanceAnalyzerItem_Icon.png"
+          },
+          "availableIn": [
+            "home",
+            "create-hub",
+            "workspace-plus-new",
+            "workspace-plus-new-teams"
+          ],
+          "itemType": "GovernanceAnalyzer",
+          "createItemDialogConfig": {
+            "onCreationFailure": { "action": "item.onCreationFailure" },
+            "onCreationSuccess": { "action": "item.onCreationSuccess" }
+          }
+        }
+      ]
+    },
+    "productDetail": {
+      "publisher": "BeSmarterWithData",
+      "slogan": "Be smarter with every change - Power BI Governance Made Easy",
+      "description": "ImpactIQ provides automated governance, impact analysis, and comprehensive metadata extraction for Power BI and Fabric environments. Identify downstream impacts of model changes, discover unused objects, and maintain a clear view of your entire analytics environment.",
+      "image": {
+        "mediaType": 0,
+        "source": "assets/images/Workload_Hub_Banner.png"
+      },
+      "slideMedia": [
+        {
+          "mediaType": 0,
+          "source": "assets/images/Workload_Hub_SlideMedia_1.png"
+        }
+      ],
+      "supportLink": {
+        "documentation": {"url": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs"},
+        "help": {"url": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs/issues"},
+        "privacy": {"url": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs"},
+        "terms": {"url": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs"},
+        "license": {"url": "https://github.com/BeSmarterWithData/ImpactIQ-SemanticLinkLabs"}
+      }
+    },
+    "itemJobTypes": ["storeData", "others"],
+    "compatibleItemTypes": ["Lakehouse", "Notebook"]
+}

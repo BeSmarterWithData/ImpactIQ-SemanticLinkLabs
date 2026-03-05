@@ -25,6 +25,7 @@ This provides a quick and automated way to identify where and how specific field
 ---
 #### ✨ Recently Added Features
 
+- **🎉 Fabric Workload (NEW!)** → One-click deployment! Deploy ImpactIQ as a native Fabric Workload directly from the Workload Hub. See the [Workload directory](./Workload/) for details.
 - **Workspace Selector** → Only want to run this against 1, 2, 10 workspaces? Now
 a popup will allow you to choose which workspaces you run this against. Select All will still run against eveyrthing and a built-in timer ensures no selection will run against everything.
 - **Unused Model Objects** → Identify model fields/measures not used in any visuals, measures, calculated columns, or relationships.  
@@ -35,6 +36,7 @@ a popup will allow you to choose which workspaces you run this against. Select A
 
 ## 🚀 Quick Start Instructions  
 
+> **💡 New!** You can now deploy ImpactIQ as a **Fabric Workload** for one-click installation! See the [Workload Setup Guide](./Workload/README.md) for the enterprise deployment option. The instructions below are for the manual notebook-based approach.
 
 ## Step 1: Import the Notebook
 
