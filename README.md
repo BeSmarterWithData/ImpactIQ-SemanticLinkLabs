@@ -39,12 +39,12 @@ a popup will allow you to choose which workspaces you run this against. Select A
 ## Step 1: Import the Notebook
 
 1. **Download the notebook**
-   - Download `GovernanceNotebook.py` from this repository
+   - Download `GovernanceNotebook.ipynb` from this repository
 
 2. **Import into your workspace**
    - In your Fabric workspace, click **Import** → **Notebook**
    - Choose **Upload from this computer**
-   - Select the downloaded `GovernanceNotebook.py` file
+   - Select the downloaded `GovernanceNotebook.ipynb` file
    - Click **Open**
 
 ---
