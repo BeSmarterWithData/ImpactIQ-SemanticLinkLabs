@@ -19,7 +19,7 @@ WORKSPACE_NAMES = ["All"]         # <-- ["All"] to scan and loop through all wor
 #     - Lower values = slower but gentler on API rate limits
 #     - Recommended: 3-5 for most environments
 
-MAX_PARALLEL_WORKERS = 10
+MAX_PARALLEL_WORKERS = 5
 
 # EXTRACT_MODEL_DEPENDENCIES: Extract measure/column/calc-item dependencies
 #     - True = extract dependencies (slower, requires additional XMLA queries per model)
@@ -206,7 +206,7 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # If a cell is skipped, the table remains empty rather than stale.
 
 ALL_TABLE_SCHEMAS = {
-    # Cell 1 tables
+    # API Metadata
     "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
     "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
     "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": "", "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
@@ -221,10 +221,10 @@ ALL_TABLE_SCHEMAS = {
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
     "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
     "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""},
-    # Cell 2 tables
+    # Model Detail
     "ModelDetail": {"Type": "", "Table": "", "Name": "", "FormatString": "", "DisplayFolder": "", "Description": "", "IsHidden": "", "TableStorageMode": "", "Expression": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": "", "RelationshipFromTable": "", "RelationshipFromColumn": "", "RelationshipToTable": "", "RelationshipToColumn": "", "RelationshipStatus": "", "RelationshipFromCardinality": "", "RelationshipToCardinality": "", "RelationshipCrossFilteringBehavior": ""},
     "ModelDependencies": {"ObjectName": "", "ObjectType": "", "DependsOn": "", "DependsOnType": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": ""},
-    # Cell 3 tables
+    # Report Detail
     "Connections": {"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""},
     "Pages": {"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": "", "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""},
     "Visuals": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": "", "HiddenFlag": "", "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": "", "RowSubTotals": "", "ColumnSubTotals": "", "DataVisual": "", "HasSparkline": "", "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""},
@@ -236,7 +236,7 @@ ALL_TABLE_SCHEMAS = {
     "VisualObjects": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": "", "Sparkline": "", "VisualCalc": "", "Format": "", "ReportDate": "", "WorkspaceName": ""},
     "ReportLevelMeasures": {"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""},
     "VisualInteractions": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""},
-    # Cell 4 tables
+    # Dataflow Detail
     "DataflowDetail": {"DataflowId": "", "DataflowName": "", "QueryName": "", "Query": "", "ReportDate": "", "WorkspaceName": "", "WorkspaceNameDataflowName": ""},
 }
 
@@ -275,27 +275,6 @@ reports_in_app_info = []
 # Lookup tables
 dataset_name_lookup = {}
 dataflow_name_lookup = {}
-
-# ==============================================================  
-# SAMPLE ROWS FOR EMPTY TABLE CREATION
-# ==============================================================
-
-SAMPLE_ROWS = {
-    "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
-    "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
-    "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": "", "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
-    "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
-    "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
-    "DatasetRefreshSchedule": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshScheduleEnabled": "", "DatasetRefreshScheduleLocalTimeZoneId": "", "DatasetRefreshScheduleNotifyOption": "", "DatasetRefreshScheduleDay": "", "DatasetRefreshScheduleTime": ""},
-    "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
-    "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
-    "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
-    "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
-    "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
-    "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
-    "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
-    "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""}
-}
 
 # ==============================================================  
 # HELPER FUNCTIONS
@@ -838,21 +817,11 @@ log("\n" + "="*80)
 log("Writing output to Lakehouse")
 log("="*80)
 
-def write_table(data, name, sample_row=None):
+def write_table(data, name):
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     if not data:
-        # Create empty table using sample row structure if provided
-        if sample_row:
-            log(f"Creating empty table with schema: {name}")
-            pandas_df = pd.DataFrame([sample_row])
-            df = spark.createDataFrame(pandas_df)
-            # Filter to create empty dataframe with schema
-            empty_df = df.filter("1=0")
-            empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
-            log(f"✓ Created empty table: {full_name}\n")
-        else:
-            log(f"⚠ Empty table skipped (no schema): {name}\n")
+        log(f"⚠ No data for {name}, skipping (already cleared at startup)\n")
         return
 
     # Convert to pandas DataFrame first for proper type handling, then to Spark
@@ -866,20 +835,20 @@ def write_table(data, name, sample_row=None):
     log(f"✓ Wrote table: {full_name}\n")
 
 # Write all tables matching PowerShell script worksheets
-write_table(workspaces_info, "Workspaces", SAMPLE_ROWS.get("Workspaces"))
-write_table(fabric_items_info, "FabricItems", SAMPLE_ROWS.get("FabricItems"))
-write_table(datasets_info, "Datasets", SAMPLE_ROWS.get("Datasets"))
-write_table(dataset_sources_info, "DatasetSourcesInfo", SAMPLE_ROWS.get("DatasetSourcesInfo"))
-write_table(dataset_refresh_history, "DatasetRefreshHistory", SAMPLE_ROWS.get("DatasetRefreshHistory"))
-write_table(dataset_refresh_schedule, "DatasetRefreshSchedule", SAMPLE_ROWS.get("DatasetRefreshSchedule"))
-write_table(dataflows_info, "Dataflows", SAMPLE_ROWS.get("Dataflows"))
-write_table(dataflow_lineage, "DataflowLineage", SAMPLE_ROWS.get("DataflowLineage"))
-write_table(dataflow_sources_info, "DataflowSourcesInfo", SAMPLE_ROWS.get("DataflowSourcesInfo"))
-write_table(dataflow_refresh_history, "DataflowRefreshHistory", SAMPLE_ROWS.get("DataflowRefreshHistory"))
-write_table(reports_info, "Reports", SAMPLE_ROWS.get("Reports"))
-write_table(report_pages_info, "ReportPages", SAMPLE_ROWS.get("ReportPages"))
-write_table(apps_info, "Apps", SAMPLE_ROWS.get("Apps"))
-write_table(reports_in_app_info, "AppReports", SAMPLE_ROWS.get("AppReports"))
+write_table(workspaces_info, "Workspaces")
+write_table(fabric_items_info, "FabricItems")
+write_table(datasets_info, "Datasets")
+write_table(dataset_sources_info, "DatasetSourcesInfo")
+write_table(dataset_refresh_history, "DatasetRefreshHistory")
+write_table(dataset_refresh_schedule, "DatasetRefreshSchedule")
+write_table(dataflows_info, "Dataflows")
+write_table(dataflow_lineage, "DataflowLineage")
+write_table(dataflow_sources_info, "DataflowSourcesInfo")
+write_table(dataflow_refresh_history, "DataflowRefreshHistory")
+write_table(reports_info, "Reports")
+write_table(report_pages_info, "ReportPages")
+write_table(apps_info, "Apps")
+write_table(reports_in_app_info, "AppReports")
 
 # ==============================================================  
 # END
