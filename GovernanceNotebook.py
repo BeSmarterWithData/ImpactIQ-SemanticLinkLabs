@@ -126,14 +126,10 @@ print(f"  Extract Report Metadata: {EXTRACT_REPORT_METADATA}")
 # 4. DatasetSourcesInfo - dataset data sources
 # 5. DatasetRefreshHistory - dataset refresh history
 # 6. DatasetRefreshSchedule - dataset refresh schedule with day/time combinations
-# 7. Dataflows - dataflow metadata with renamed columns
-# 8. DataflowLineage - dataflow lineage (upstream dataflows)
-# 9. DataflowSourcesInfo - dataflow data sources
-# 10. DataflowRefreshHistory - dataflow refresh history
-# 11. Reports - report metadata with renamed columns
-# 12. ReportPages - report pages with renamed columns
-# 13. Apps - Power BI apps
-# 14. AppReports - reports within apps
+# 7. Reports - report metadata with renamed columns
+# 8. ReportPages - report pages with renamed columns
+# 9. Apps - Power BI apps
+# 10. AppReports - reports within apps
 #
 # All column names are renamed to match the PowerShell script output.
 #
@@ -206,25 +202,21 @@ log(f"✓ Schema is ready: {schema_name}\n")
 # If a cell is skipped, the table remains empty rather than stale.
 
 ALL_TABLE_SCHEMAS = {
-    # API Metadata
+    # Cell 1 tables
     "Workspaces": {"WorkspaceId": "", "WorkspaceName": "", "WorkspaceType": "", "WorkspaceCapacityId": ""},
     "FabricItems": {"WorkspaceId": "", "WorkspaceName": "", "FabricItemID": "", "FabricItemType": "", "FabricItemName": "", "FabricItemDescription": ""},
     "Datasets": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDescription": "", "DatasetWebUrl": "", "DatasetConfiguredBy": "", "DatasetIsRefreshable": "", "DatasetTargetStorageMode": "", "DatasetCreatedDate": ""},
     "DatasetSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetDatasourceType": "", "DatasetDatasourceId": "", "DatasetDatasourceGatewayId": "", "DatasetDatasourceConnectionDetails": ""},
     "DatasetRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshRequestId": "", "DatasetRefreshId": "", "DatasetRefreshStartTime": "", "DatasetRefreshEndTime": "", "DatasetRefreshStatus": "", "DatasetRefreshType": ""},
     "DatasetRefreshSchedule": {"WorkspaceId": "", "WorkspaceName": "", "DatasetId": "", "DatasetName": "", "DatasetRefreshScheduleEnabled": "", "DatasetRefreshScheduleLocalTimeZoneId": "", "DatasetRefreshScheduleNotifyOption": "", "DatasetRefreshScheduleDay": "", "DatasetRefreshScheduleTime": ""},
-    "Dataflows": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDescription": "", "DataflowConfiguredBy": "", "DataflowModifiedBy": "", "DataflowModifiedDateTime": "", "DataflowJsonURL": "", "DataflowGeneration": ""},
-    "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
-    "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
-    "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
     "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
     "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
     "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""},
-    # Model Detail
+    # Cell 2 tables
     "ModelDetail": {"Type": "", "Table": "", "Name": "", "FormatString": "", "DisplayFolder": "", "Description": "", "IsHidden": "", "TableStorageMode": "", "Expression": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": "", "RelationshipFromTable": "", "RelationshipFromColumn": "", "RelationshipToTable": "", "RelationshipToColumn": "", "RelationshipStatus": "", "RelationshipFromCardinality": "", "RelationshipToCardinality": "", "RelationshipCrossFilteringBehavior": ""},
     "ModelDependencies": {"ObjectName": "", "ObjectType": "", "DependsOn": "", "DependsOnType": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": ""},
-    # Report Detail
+    # Cell 3 tables
     "Connections": {"ReportID": "", "ModelID": "", "ReportDate": "", "ReportName": "", "Type": "", "ServerName": "", "WorkspaceName": ""},
     "Pages": {"ReportName": "", "ReportID": "", "ModelID": "", "Id": "", "Name": "", "Number": 0, "Width": 0, "Height": 0, "HiddenFlag": "", "VisualCount": 0, "Type": "", "DisplayOption": "", "DataVisualCount": 0, "VisibleVisualCount": 0, "PageFilterCount": 0, "ReportDate": "", "WorkspaceName": ""},
     "Visuals": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "Id": "", "Name": "", "Type": "", "DisplayType": "", "Title": "", "SubTitle": "", "AltText": "", "TabOrder": 0, "CustomVisualFlag": "", "HiddenFlag": "", "X": 0.0, "Y": 0.0, "Z": 0, "Width": 0.0, "Height": 0.0, "ObjectCount": 0, "VisualFilterCount": 0, "DataLimit": 0, "Divider": "", "RowSubTotals": "", "ColumnSubTotals": "", "DataVisual": "", "HasSparkline": "", "ParentGroup": "", "ReportDate": "", "WorkspaceName": ""},
@@ -236,8 +228,6 @@ ALL_TABLE_SCHEMAS = {
     "VisualObjects": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "VisualId": "", "VisualName": "", "VisualType": "", "CustomVisualFlag": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Source": "", "displayName": "", "ImplicitMeasure": "", "Sparkline": "", "VisualCalc": "", "Format": "", "ReportDate": "", "WorkspaceName": ""},
     "ReportLevelMeasures": {"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""},
     "VisualInteractions": {"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""},
-    # Dataflow Detail
-    "DataflowDetail": {"DataflowId": "", "DataflowName": "", "QueryName": "", "Query": "", "ReportDate": "", "WorkspaceName": "", "WorkspaceNameDataflowName": ""},
 }
 
 log("Clearing all output tables (removing stale data from prior runs)...")
@@ -263,10 +253,6 @@ datasets_info = []
 dataset_sources_info = []
 dataset_refresh_history = []
 dataset_refresh_schedule = []
-dataflows_info = []
-dataflow_lineage = []
-dataflow_sources_info = []
-dataflow_refresh_history = []
 reports_info = []
 report_pages_info = []
 apps_info = []
@@ -274,7 +260,6 @@ reports_in_app_info = []
 
 # Lookup tables
 dataset_name_lookup = {}
-dataflow_name_lookup = {}
 
 # ==============================================================  
 # HELPER FUNCTIONS
@@ -297,7 +282,7 @@ def serialize_json(obj):
 # ==============================================================  
 # PARALLEL API HELPERS FOR PERFORMANCE
 # ==============================================================
-# These helpers enable parallel fetching of dataset/dataflow details
+# These helpers enable parallel fetching of dataset details
 # which significantly reduces total extraction time.
 
 # Use the configured parallel worker setting
@@ -390,55 +375,6 @@ def fetch_dataset_details(client, ws_id, ws_name, dataset_id, dataset_name):
         errors.append(f"refresh schedule: {e}")
     
     return sources, refreshes, schedules, errors
-
-def fetch_dataflow_details(client, ws_id, ws_name, dataflow_id, dataflow_name):
-    """Fetch dataflow sources and refresh history in parallel"""
-    sources = []
-    refreshes = []
-    errors = []
-    
-    # Fetch dataflow sources
-    try:
-        sources_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/datasources"
-        response = client.get(sources_url)
-        if response.status_code == 200:
-            for source in response.json().get('value', []):
-                sources.append({
-                    "WorkspaceId": ws_id,
-                    "WorkspaceName": ws_name,
-                    "DataflowId": dataflow_id,
-                    "DataflowName": dataflow_name,
-                    "DataflowDatasourceType": source.get("datasourceType", ""),
-                    "DataflowDatasourceId": source.get("datasourceId", ""),
-                    "DataflowDatasourceGatewayId": source.get("gatewayId", ""),
-                    "DataflowDatasourceConnectionDetails": serialize_json(source.get("connectionDetails"))
-                })
-    except Exception as e:
-        errors.append(f"datasources: {e}")
-    
-    # Fetch dataflow refresh history (transactions)
-    try:
-        refresh_url = f"v1.0/myorg/groups/{ws_id}/dataflows/{dataflow_id}/transactions"
-        response = client.get(refresh_url)
-        if response.status_code == 200:
-            for refresh in response.json().get('value', []):
-                refreshes.append({
-                    "WorkspaceId": ws_id,
-                    "WorkspaceName": ws_name,
-                    "DataflowId": dataflow_id,
-                    "DataflowName": dataflow_name,
-                    "DataflowRefreshRequestId": refresh.get("requestId", ""),
-                    "DataflowRefreshId": refresh.get("id", ""),
-                    "DataflowRefreshStartTime": refresh.get("startTime", ""),
-                    "DataflowRefreshEndTime": refresh.get("endTime", ""),
-                    "DataflowRefreshStatus": refresh.get("status", ""),
-                    "DataflowRefreshType": refresh.get("refreshType", ""),
-                    "DataflowErrorInfo": serialize_json(refresh.get("errorInfo"))
-                })
-    except Exception as e:
-        errors.append(f"refresh history: {e}")
-    
-    return sources, refreshes, errors
 
 # ==============================================================  
 # GET WORKSPACES
@@ -536,66 +472,6 @@ for ws_info in workspaces_info:
             
     except Exception as e:
         log(f"  ERROR fetching datasets: {e}")
-
-    # -------------------- DATAFLOWS (with parallel detail fetching) --------------------
-    try:
-        log(f"  Fetching dataflows...")
-        dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
-        response = client.get(dataflows_url)
-        
-        if response.status_code == 200:
-            dataflows = response.json().get('value', [])
-            log(f"  Dataflows found: {len(dataflows)}")
-            
-            # Collect dataflow basic info first
-            dataflow_tasks = []
-            for dataflow in dataflows:
-                dataflow_id = dataflow.get("objectId", "")
-                dataflow_name = dataflow.get("name", "")
-                
-                # Store in lookup
-                if dataflow_id:
-                    dataflow_name_lookup[dataflow_id] = dataflow_name
-                
-                dataflows_info.append({
-                    "WorkspaceId": ws_id,
-                    "WorkspaceName": ws_name,
-                    "DataflowId": dataflow_id,
-                    "DataflowName": dataflow_name,
-                    "DataflowDescription": dataflow.get("description", ""),
-                    "DataflowConfiguredBy": dataflow.get("configuredBy", ""),
-                    "DataflowModifiedBy": dataflow.get("modifiedBy", ""),
-                    "DataflowModifiedDateTime": dataflow.get("modifiedDateTime", ""),
-                    "DataflowJsonURL": dataflow.get("modelUrl", ""),
-                    "DataflowGeneration": dataflow.get("generation", "")
-                })
-                
-                dataflow_tasks.append((dataflow_id, dataflow_name))
-            
-            # Fetch dataflow details in parallel
-            if dataflow_tasks:
-                log(f"  Fetching dataflow details in parallel (max {MAX_WORKERS} workers)...")
-                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                    futures = {
-                        executor.submit(fetch_dataflow_details, client, ws_id, ws_name, df_id, df_name): (df_id, df_name)
-                        for df_id, df_name in dataflow_tasks
-                    }
-                    for future in as_completed(futures):
-                        try:
-                            sources, refreshes, errors = future.result()
-                            dataflow_sources_info.extend(sources)
-                            dataflow_refresh_history.extend(refreshes)
-                            if errors:
-                                df_id, df_name = futures[future]
-                                for err in errors:
-                                    log(f"    Warning ({df_name}): {err}")
-                        except Exception as e:
-                            df_id, df_name = futures[future]
-                            log(f"    Error fetching details for {df_name}: {e}")
-        else:
-            log(f"  No dataflows found")
-    except Exception as e:
-        log(f"  ERROR fetching dataflows: {e}")
 
     # -------------------- FABRIC ITEMS --------------------
     try:
@@ -774,42 +650,6 @@ except Exception as e:
     log(f"ERROR fetching apps: {e}")
 
 # ==============================================================  
-# DATAFLOW LINEAGE
-# ==============================================================
-
-log("\n" + "="*80)
-log("Fetching Dataflow Lineage")
-log("="*80)
-
-for ws_info in workspaces_info:
-    ws_name = ws_info["WorkspaceName"]
-    ws_id = ws_info["WorkspaceId"]
-    
-    try:
-        lineage_url = f"v1.0/myorg/groups/{ws_id}/dataflows/upstreamDataflows"
-        response = client.get(lineage_url)
-        
-        if response.status_code == 200:
-            lineage_items = response.json().get('value', [])
-            
-            for lineage in lineage_items:
-                dataflow_id = lineage.get("dataflowObjectId", "")
-                dataset_id = lineage.get("datasetObjectId", "")
-                
-                dataflow_lineage.append({
-                    "WorkspaceId": ws_id,
-                    "WorkspaceName": ws_name,
-                    "DataflowId": dataflow_id,
-                    "DataflowName": dataflow_name_lookup.get(dataflow_id, "Unknown Dataflow"),
-                    "DatasetId": dataset_id,
-                    "DatasetName": dataset_name_lookup.get(dataset_id, "Unknown Dataset")
-                })
-    except Exception as e:
-        log(f"  Could not fetch dataflow lineage for {ws_name}: {e}")
-
-log("✓ Dataflow lineage collection complete")
-
-# ==============================================================  
 # WRITE TO LAKEHOUSE
 # ==============================================================
 
@@ -821,7 +661,7 @@ def write_table(data, name):
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
     
     if not data:
-        log(f"⚠ No data for {name}, skipping (already cleared at startup)\n")
+        log(f"No data for {name}, skipping (already cleared at startup)\n")
         return
 
     # Convert to pandas DataFrame first for proper type handling, then to Spark
@@ -834,17 +674,13 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-# Write all tables matching PowerShell script worksheets
+# Write all tables
 write_table(workspaces_info, "Workspaces")
 write_table(fabric_items_info, "FabricItems")
 write_table(datasets_info, "Datasets")
 write_table(dataset_sources_info, "DatasetSourcesInfo")
 write_table(dataset_refresh_history, "DatasetRefreshHistory")
 write_table(dataset_refresh_schedule, "DatasetRefreshSchedule")
-write_table(dataflows_info, "Dataflows")
-write_table(dataflow_lineage, "DataflowLineage")
-write_table(dataflow_sources_info, "DataflowSourcesInfo")
-write_table(dataflow_refresh_history, "DataflowRefreshHistory")
 write_table(reports_info, "Reports")
 write_table(report_pages_info, "ReportPages")
 write_table(apps_info, "Apps")
@@ -1274,11 +1110,14 @@ def extract_single_model(ws_name, model_name, model_id, report_date):
         relationships = tom.model.Relationships
         log_msgs.append(f"    Relationships: {len(relationships)}")
         for r in relationships:
+            cross = r.CrossFilteringBehavior.ToString()
+            arrow = "<-->" if cross == "BothDirections" else "->"
+            expr = f"'{r.FromTable.Name}'[{r.FromColumn.Name}] {arrow} '{r.ToTable.Name}'[{r.ToColumn.Name}]"
             details.append({
                 "Type": "Relationship", "Table": r.FromTable.Name, "Name": r.FromColumn.Name,
                 "FormatString": "", "DisplayFolder": "", "Description": "",
                 "IsHidden": "", "TableStorageMode": "",
-                "Expression": r.Name if r.Name else "",
+                "Expression": expr,
                 "ModelAsOfDate": report_date,
                 "ModelName": model_name, "ModelID": model_id, "WorkspaceName": ws_name,
                 "RelationshipFromTable": r.FromTable.Name,
@@ -1514,10 +1353,11 @@ log("="*80)
 
 # %pip install semantic-link-labs --quiet
 
-import time, re, pandas as pd
+import time, re, math, json, base64, pandas as pd
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
+from sempy.fabric import FabricRestClient
 from sempy_labs.report import ReportWrapper
 # Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
 from sempy_labs._helper_functions import resolve_dataset_from_report
@@ -1587,12 +1427,638 @@ all_visual_objects = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageNam
 all_report_level_measures = [{"ReportName": "", "ReportID": "", "ModelID": "", "TableName": "", "ObjectName": "", "ObjectType": "", "Expression": "", "HiddenFlag": "", "FormatString": "", "DataType": "", "DataCategory": "", "ReportDate": "", "WorkspaceName": ""}]
 all_visual_interactions = [{"ReportName": "", "ReportID": "", "ModelID": "", "PageName": "", "PageId": "", "SourceVisualID": "", "TargetVisualID": "", "SourceVisualName": "", "TargetVisualName": "", "TypeID": "", "Type": "", "ReportDate": "", "WorkspaceName": ""}]
 
+# ==============================================================
+# NON-PBIR (CLASSIC LAYOUT) PARSER + getDefinition FETCH HELPERS
+# ==============================================================
+# Reports authored in the classic (non-PBIR) format are not readable by
+# ReportWrapper. For those, we fetch the report definition the same way the
+# PowerShell solution does (Fabric getDefinition API), take the legacy
+# "report.json" (which IS the classic Report/Layout), and parse it in-memory
+# with the port of "Report Detail Extract Script.csx" below. Connections are
+# synthesized from "definition.pbir" (datasetReference) exactly like the PS.
+
+def dig(obj, *path):
+    cur = obj
+    for key in path:
+        if cur is None:
+            return None
+        if isinstance(key, int):
+            cur = cur[key] if isinstance(cur, list) and -len(cur) <= key < len(cur) else None
+        else:
+            cur = cur[key] if isinstance(cur, dict) and key in cur else None
+    return cur
+
+
+def digs(obj, *path):
+    v = dig(obj, *path)
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    return str(v)
+
+
+def parse_json_field(parent, key):
+    raw = dig(parent, key)
+    if raw is None:
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    if not isinstance(raw, str) or raw.strip() == "":
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def to_int(v, default=0):
+    if v is None:
+        return default
+    try:
+        return int(math.ceil(float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def as_bool(v, default=False):
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return default
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1")
+    return default
+
+
+def find_field(node):
+    if isinstance(node, dict):
+        for obj_type in ("Measure", "Column"):
+            ref = node.get(obj_type)
+            if isinstance(ref, dict) and "Property" in ref:
+                return (dig(ref, "Expression", "SourceRef", "Entity"), ref.get("Property"), obj_type)
+        for value in node.values():
+            found = find_field(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = find_field(item)
+            if found:
+                return found
+    return None
+
+
+def resolve_filter_field(expr):
+    if not isinstance(expr, dict):
+        return (None, None, None)
+    hier_level = expr.get("HierarchyLevel")
+    if isinstance(hier_level, dict):
+        level = dig(hier_level, "Level")
+        hier = dig(hier_level, "Expression", "Hierarchy", "Hierarchy")
+        entity = dig(hier_level, "Expression", "Hierarchy", "Expression", "SourceRef", "Entity")
+        if hier is not None and level is not None:
+            return (entity, f"{hier}.{level}", "Hierarchy")
+    return find_field(expr) or (None, None, None)
+
+
+def filter_how_created(filter_type):
+    if filter_type == "Advanced":
+        return "Manual"
+    if filter_type:
+        return "Auto"
+    return ""
+
+
+_LIVE_TYPES = ("pbiServiceLive", "pbiServiceXmlaStyleLive", "analysisServicesDatabaseLive")
+
+
+def _extract_server_name(connection_string):
+    if not connection_string:
+        return ""
+    cs_lower = connection_string.lower()
+    if "data source=" not in cs_lower or "initial catalog=" not in cs_lower:
+        return ""
+    start = cs_lower.index("data source=") + len("data source=")
+    semi = cs_lower.find(";", start)
+    if semi == -1:
+        semi = len(connection_string)
+    return connection_string[start:semi] if semi > start else ""
+
+
+def parse_connections(conn_json_str, report_id_override=None, model_id_override=None):
+    server_name = model_id = report_id = conn_type = ""
+    conn = None
+    if conn_json_str:
+        if isinstance(conn_json_str, (dict, list)):
+            conn = conn_json_str
+        elif isinstance(conn_json_str, (bytes, bytearray)):
+            try:
+                conn = json.loads(bytes(conn_json_str).decode("utf-8-sig"))
+            except Exception:
+                conn = None
+        elif isinstance(conn_json_str, str) and conn_json_str.strip():
+            try:
+                conn = json.loads(conn_json_str.lstrip("\ufeff"))
+            except Exception:
+                conn = None
+    has_conn = isinstance(conn, dict)
+    if has_conn:
+        try:
+            for o in (dig(conn, "Connections") or []):
+                conn_type = digs(o, "ConnectionType") or conn_type
+                if conn_type in _LIVE_TYPES:
+                    model_id = digs(conn, "RemoteArtifacts", 0, "DatasetId") or model_id
+                    report_id = digs(conn, "RemoteArtifacts", 0, "ReportId") or report_id
+                else:
+                    model_id = digs(o, "PbiModelDatabaseName") or model_id
+                server_name = _extract_server_name(digs(o, "ConnectionString")) or server_name
+        except Exception:
+            model_id = digs(conn, "RemoteArtifacts", 0, "DatasetId") or model_id
+            report_id = digs(conn, "RemoteArtifacts", 0, "ReportId") or report_id
+            conn_type = "localPowerQuery"
+    if report_id_override:
+        report_id = report_id_override
+    if model_id_override:
+        model_id = model_id_override
+    return {"server_name": server_name or "", "model_id": model_id or "",
+            "report_id": report_id or "", "conn_type": conn_type or "", "has_conn": has_conn}
+
+
+SELECT_CANDIDATES = [
+    ("Column",  ["Column", "Property"], ["Column", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Measure", "Property"], ["Measure", "Expression", "SourceRef", "Source"]),
+    ("Column",  ["Arithmetic", "Left", "Aggregation", "Expression", "Column", "Property"],  ["Arithmetic", "Left", "Aggregation", "Expression", "Column", "Expression", "SourceRef", "Source"]),
+    ("Column",  ["Arithmetic", "Right", "Aggregation", "Expression", "Column", "Property"], ["Arithmetic", "Right", "Aggregation", "Expression", "Column", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Arithmetic", "Left", "Aggregation", "Expression", "Measure", "Property"], ["Arithmetic", "Left", "Aggregation", "Expression", "Measure", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Arithmetic", "Right", "Aggregation", "Expression", "Measure", "Property"], ["Arithmetic", "Right", "Aggregation", "Expression", "Measure", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Arithmetic", "Right", "Measure", "Property"], ["Arithmetic", "Right", "Measure", "Expression", "SourceRef", "Source"]),
+    ("Column",  ["Arithmetic", "Left", "Column", "Property"],  ["Arithmetic", "Left", "Column", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Arithmetic", "Left", "Measure", "Property"], ["Arithmetic", "Left", "Measure", "Expression", "SourceRef", "Source"]),
+    ("Column",  ["Arithmetic", "Right", "Column", "Property"], ["Arithmetic", "Right", "Column", "Expression", "SourceRef", "Source"]),
+    ("Column",  ["Aggregation", "Expression", "Column", "Property"],  ["Aggregation", "Expression", "Column", "Expression", "SourceRef", "Source"]),
+    ("Measure", ["Aggregation", "Expression", "Measure", "Property"], ["Aggregation", "Expression", "Measure", "Expression", "SourceRef", "Source"]),
+]
+
+_COLOR_SPECS = [
+    (("singleVisual", "objects", "labels"), "color", "Label"),
+    (("singleVisual", "objects", "categoryAxis"), "labelColor", "X Axis Color"),
+    (("singleVisual", "objects", "categoryAxis"), "titleColor", "X Axis Title Color"),
+    (("singleVisual", "objects", "valueAxis"), "labelColor", "Y Axis Color"),
+    (("singleVisual", "objects", "valueAxis"), "titleColor", "Y Axis Title Color"),
+    (("singleVisual", "objects", "categoryLabels"), "color", "Category Label"),
+    (("singleVisual", "objects", "values"), "backColor", "Conditional Formatting (Background Color)"),
+    (("singleVisual", "objects", "values"), "fontColor", "Conditional Formatting (Font Color)"),
+    (("singleVisual", "vcObjects", "title"), "fontColor", "Title Font Color"),
+    (("singleVisual", "vcObjects", "title"), "background", "Title Background"),
+    (("singleVisual", "vcObjects", "background"), "color", "Background"),
+    (("singleVisual", "vcObjects", "border"), "color", "Border"),
+    (("singleVisual", "vcObjects", "dropShadow"), "color", "Drop Shadow"),
+]
+
+OBJECT_EXTRACTORS = [
+    (c, ("properties", p, "solid", "color", "expr"), s) for (c, p, s) in _COLOR_SPECS
+] + [
+    (("singleVisual", "objects", "text"), ("properties", "text", "expr"), "Text"),
+    (("singleVisual", "objects", "values"), ("properties", "icon", "value", "expr"), "Conditional Formatting (Icon)"),
+    (("singleVisual", "objects", "values"), ("properties", "webURL", "expr"), "Conditional Formatting (WebURL)"),
+    (("singleVisual", "objects", "categoryAxis"), ("properties", "start", "expr"), "Y Axis Minimum"),
+    (("singleVisual", "objects", "categoryAxis"), ("properties", "end", "expr"), "Y Axis Minimum"),
+    (("singleVisual", "vcObjects", "title"), ("properties", "text", "expr"), "Title Text"),
+    (("singleVisual", "vcObjects", "title"), ("properties", "text", "solid", "color", "expr"), "Title Text"),
+]
+
+
+def _table_resolver(from_list):
+    alias = {}
+    for t in (from_list or []):
+        name = digs(t, "Name")
+        if name is not None:
+            alias[name] = digs(t, "Entity") or ""
+    return lambda src: alias.get(src, "") if src is not None else ""
+
+
+def _vo_row(table, obj, obj_type, source, display_name, applied_filter_version):
+    return {"TableName": table or "", "ObjectName": obj, "ObjectType": obj_type,
+            "Source": source, "displayName": display_name, "AppliedFilterVersion": applied_filter_version}
+
+
+def extract_visual_objects(config, applied_filter_version):
+    rows = []
+    select = dig(config, "singleVisual", "prototypeQuery", "Select")
+    if isinstance(select, list):
+        resolve = _table_resolver(dig(config, "singleVisual", "prototypeQuery", "From"))
+        for sel in select:
+            object_name, object_type, src, is_spark = "", "", None, False
+            for obj_type, name_path, src_path in SELECT_CANDIDATES:
+                if dig(sel, *name_path) is not None:
+                    object_name = digs(sel, *name_path)
+                    object_type = obj_type
+                    src = digs(sel, *src_path)
+            level = dig(sel, "HierarchyLevel", "Level")
+            if level is not None:
+                hier = digs(sel, "HierarchyLevel", "Expression", "Hierarchy", "Hierarchy")
+                object_name = f"{hier}.{digs(sel, 'HierarchyLevel', 'Level')}"
+                object_type = "Hierarchy"
+                src = digs(sel, "HierarchyLevel", "Expression", "Hierarchy", "Expression", "SourceRef", "Source")
+            if dig(sel, "SparklineData", "Measure", "Measure", "Property") is not None:
+                object_name = digs(sel, "SparklineData", "Measure", "Measure", "Property")
+                object_type = "Measure"
+                is_spark = True
+                src = digs(sel, "SparklineData", "Measure", "Measure", "Expression", "SourceRef", "Source")
+            if dig(sel, "SparklineData", "Measure", "Aggregation", "Expression", "Column", "Property") is not None:
+                object_name = digs(sel, "SparklineData", "Measure", "Aggregation", "Expression", "Column", "Property")
+                object_type = "Column"
+                is_spark = True
+                src = digs(sel, "SparklineData", "Measure", "Aggregation", "Expression", "Column", "Expression", "SourceRef", "Source")
+            display_name = digs(config, "singleVisual", "columnProperties", digs(sel, "Name"), "displayName")
+            source_label = "Sparkline" if is_spark else "Standard"
+            rows.append(_vo_row(resolve(src), object_name, object_type, source_label, display_name, applied_filter_version))
+            if is_spark and dig(sel, "SparklineData", "Groupings", 0, "Column", "Property") is not None:
+                g_obj = digs(sel, "SparklineData", "Groupings", 0, "Column", "Property")
+                g_src = digs(sel, "SparklineData", "Groupings", 0, "Column", "Expression", "SourceRef", "Source")
+                rows.append(_vo_row(resolve(g_src), g_obj, "Column", source_label, display_name, None))
+    for container_path, expr_subpath, source in OBJECT_EXTRACTORS:
+        container = dig(config, *container_path)
+        if not isinstance(container, list):
+            continue
+        for child in container:
+            expr = dig(child, *expr_subpath)
+            if expr is None:
+                continue
+            found = find_field(expr)
+            if not found:
+                continue
+            entity, prop, obj_type = found
+            rows.append(_vo_row(entity, prop, obj_type, source, digs(child, "displayName"), None))
+    return rows
+
+
+_INTERACTION_TYPES = ["blank", "Filter", "Highlight", "None"]
+
+
+def _filter_fields(o):
+    filter_type = digs(o, "type")
+    table, obj, obj_type = resolve_filter_field(dig(o, "expression"))
+    return {"displayName": digs(o, "displayName"), "TableName": table or "",
+            "ObjectName": obj if obj is not None else "", "ObjectType": obj_type or "",
+            "FilterType": filter_type, "HiddenFilter": digs(o, "isHiddenInViewMode"),
+            "LockedFilter": digs(o, "isLockedInViewMode"), "HowCreated": filter_how_created(filter_type),
+            "Used": "False", "AppliedFilterVersion": digs(o, "filter", "Version")}
+
+
+def _page_type(display_opt, width, height):
+    if display_opt == 3 and width == 320 and height == 240:
+        return "Tooltip"
+    if width == 816 and height == 1056:
+        return "Letter"
+    if width == 960 and height == 720:
+        return "4:3"
+    if width == 1280 and height == 720:
+        return "16:9"
+    return "Custom"
+
+
+def _clean_dax(s):
+    return (s or "").replace("\t", " ").replace("\r\n", " ").replace("\n", " ")
+
+
+def parse_layout(layout, report_name):
+    out = {k: [] for k in ("CustomVisuals", "ReportFilters", "PageFilters", "VisualFilters",
+                           "VisualObjects", "Visuals", "Bookmarks", "Pages", "VisualInteractions",
+                           "ReportLevelMeasures")}
+    custom_visual_names = set()
+    for o in (dig(layout, "resourcePackages") or []):
+        if dig(o, "resourcePackage", "type") == 0:
+            name = digs(o, "resourcePackage", "name")
+            out["CustomVisuals"].append({"Name": name})
+            if name:
+                custom_visual_names.add(name)
+    for o in (parse_json_field(layout, "filters") or []):
+        out["ReportFilters"].append(_filter_fields(o))
+    config = parse_json_field(layout, "config")
+
+    def process_entities(entities):
+        for ent in (entities or []):
+            table_name = digs(ent, "name") or digs(ent, "Name")
+            measures = dig(ent, "measures")
+            if measures is None:
+                measures = dig(ent, "Measures")
+            for m in (measures or []):
+                expr = digs(m, "expression") or digs(m, "Expression") or ""
+                fmt = digs(m, "formatInformation", "formatString") or ""
+                out["ReportLevelMeasures"].append({"TableName": table_name,
+                    "ObjectName": digs(m, "name") or digs(m, "Name"), "ObjectType": "Measure",
+                    "Expression": _clean_dax(expr), "HiddenFlag": "true" if as_bool(dig(m, "hidden")) else "false",
+                    "FormatString": _clean_dax(fmt)})
+
+    if isinstance(config, dict):
+        model_ext = dig(config, "modelExtensions")
+        if model_ext is None:
+            model_ext = dig(config, "ModelExtensions")
+        for me in (model_ext or []):
+            ents = dig(me, "entities")
+            if ents is None:
+                ents = dig(me, "Entities")
+            process_entities(ents)
+        ext = dig(config, "Extension")
+        if ext is not None:
+            process_entities(dig(ext, "Entities"))
+
+    pages_by_id = {}
+    for o in (dig(layout, "sections") or []):
+        page_id = digs(o, "name")
+        page_name = digs(o, "displayName")
+        if not page_name or not page_name.strip():
+            page_name = report_name
+        page_config = parse_json_field(o, "config")
+        page_flt = parse_json_field(o, "filters")
+        containers = dig(o, "visualContainers") or []
+        width = to_int(dig(o, "width"))
+        height = to_int(dig(o, "height"))
+        display_opt = to_int(dig(o, "displayOption"))
+        out["Pages"].append({"Id": page_id, "Name": page_name, "Number": to_int(dig(o, "ordinal"), 0),
+            "Width": width, "Height": height, "DisplayOption": str(display_opt),
+            "HiddenFlag": dig(page_config, "visibility") == 1, "VisualCount": len(containers),
+            "DataVisualCount": 0, "VisibleVisualCount": 0,
+            "PageFilterCount": len(page_flt) if isinstance(page_flt, list) else 0,
+            "Type": _page_type(display_opt, width, height)})
+        pages_by_id[page_id] = page_name
+        for rel in (dig(page_config, "relationships") or []):
+            tid = to_int(dig(rel, "type"), -1)
+            out["VisualInteractions"].append({"PageName": page_name, "PageId": page_id,
+                "SourceVisualID": digs(rel, "source"), "SourceVisualName": "",
+                "TargetVisualID": digs(rel, "target"), "TargetVisualName": "", "TypeID": tid,
+                "Type": _INTERACTION_TYPES[tid] if 0 <= tid < len(_INTERACTION_TYPES) else ""})
+        for o2 in (page_flt or []):
+            row = _filter_fields(o2)
+            row["PageId"] = page_id
+            row["PageName"] = page_name
+            out["PageFilters"].append(row)
+        for vc in containers:
+            config_v = parse_json_field(vc, "config")
+            visual_id = digs(config_v, "name")
+            visual_type = digs(config_v, "singleVisual", "visualType") or "visualGroup"
+            custom_flag = visual_type in custom_visual_names
+            visual_name = digs(config_v, "singleVisualGroup", "displayName") or ""
+            literal = digs(config_v, "singleVisual", "vcObjects", "title", 0, "properties", "text", "expr", "Literal", "Value")
+            if literal is not None and len(literal) >= 2:
+                visual_name = literal[1:-1]
+            if not visual_name:
+                visual_name = visual_type
+            vis_hidden = (digs(config_v, "singleVisual", "display", "mode") == "hidden") or as_bool(dig(config_v, "singleVisualGroup", "isHidden"))
+            applied_fv = digs(config_v, "singleVisual", "objects", "general", 0, "properties", "filter", "filter", "Version")
+            select = dig(config_v, "singleVisual", "prototypeQuery", "Select")
+            obj_count = len(select) if isinstance(select, list) else 0
+            for vo in extract_visual_objects(config_v, applied_fv):
+                out["VisualObjects"].append({"PageName": page_name, "PageId": page_id, "VisualId": visual_id,
+                    "VisualName": visual_name, "VisualType": visual_type, "AppliedFilterVersion": vo["AppliedFilterVersion"],
+                    "CustomVisualFlag": custom_flag, "TableName": vo["TableName"], "ObjectName": vo["ObjectName"],
+                    "ObjectType": vo["ObjectType"], "ImplicitMeasure": False, "Sparkline": False,
+                    "VisualCalc": False, "Format": "", "Source": vo["Source"], "displayName": vo["displayName"]})
+            out["Visuals"].append({"PageName": page_name, "PageId": page_id, "Id": visual_id, "Name": visual_name,
+                "Type": visual_type, "DisplayType": visual_type, "Title": "", "SubTitle": "", "AltText": "",
+                "CustomVisualFlag": custom_flag, "HiddenFlag": vis_hidden, "X": to_int(dig(vc, "x")),
+                "Y": to_int(dig(vc, "y")), "Z": to_int(dig(vc, "z")), "Width": to_int(dig(vc, "width")),
+                "Height": to_int(dig(vc, "height")), "ObjectCount": obj_count, "VisualFilterCount": 0,
+                "DataLimit": 0, "RowSubTotals": False, "ColumnSubTotals": False, "DataVisual": False,
+                "HasSparkline": False, "ParentGroup": digs(config_v, "parentGroupName") or ""})
+            for o3 in (parse_json_field(vc, "filters") or []):
+                row = _filter_fields(o3)
+                row["PageName"] = page_name
+                row["PageId"] = page_id
+                row["VisualId"] = visual_id
+                row["VisualName"] = visual_name
+                out["VisualFilters"].append(row)
+
+    coords = {v["Id"]: (v["X"], v["Y"]) for v in out["Visuals"]}
+    for v in out["Visuals"]:
+        parent = v["ParentGroup"]
+        if parent and parent in coords:
+            px, py = coords[parent]
+            v["X"] += px
+            v["Y"] += py
+
+    def add_leaf(node):
+        if dig(node, "explorationState") is None:
+            return
+        page_id = digs(node, "explorationState", "activeSection")
+        out["Bookmarks"].append({"Name": digs(node, "displayName"), "Id": digs(node, "name"),
+            "PageName": pages_by_id.get(page_id, ""), "PageId": page_id, "VisualId": "",
+            "VisualHiddenFlag": False, "SuppressData": False, "CurrentPageSelected": False,
+            "ApplyVisualDisplayState": False, "ApplyToAllVisuals": False})
+
+    if isinstance(config, dict):
+        for bk in (dig(config, "bookmarks") or []):
+            children = dig(bk, "children")
+            if children is not None:
+                for child in children:
+                    add_leaf(child)
+            else:
+                add_leaf(bk)
+    return out
+
+
+def _get_report_definition_parts(ws_id, rpt_id):
+    """Fetch a report's definition via the Fabric getDefinition API and return
+    {part_path: bytes}. Mirrors the PowerShell Export-ReportDefinitionAsPbix
+    staging (handles 200 and 202 long-running). Returns None on any failure so
+    the caller can fall back to the ReportWrapper path."""
+    if not ws_id or not rpt_id:
+        return None
+    try:
+        client = FabricRestClient()
+        url = f"v1/workspaces/{ws_id}/reports/{rpt_id}/getDefinition"
+        resp = client.post(url, json={})
+        status = getattr(resp, "status_code", None)
+        body = None
+        if status == 200:
+            body = resp.json()
+        elif status == 202:
+            op_url = resp.headers.get("Location") or resp.headers.get("location")
+            op_rel = op_url
+            if op_url and op_url.lower().startswith("http"):
+                idx = op_url.find("/v1/")
+                op_rel = op_url[idx + 1:] if idx != -1 else op_url
+            try:
+                retry = int(resp.headers.get("Retry-After", "3") or "3")
+            except Exception:
+                retry = 3
+            for _ in range(120):  # cap polling iterations
+                time.sleep(max(1, retry))
+                op = client.get(op_rel)
+                st = (op.json() or {}).get("status")
+                if st == "Succeeded":
+                    break
+                if st == "Failed":
+                    return None
+                try:
+                    retry = int(op.headers.get("Retry-After", str(retry)) or retry)
+                except Exception:
+                    pass
+            res = client.get(op_rel.rstrip("/") + "/result")
+            body = res.json()
+        else:
+            return None
+        parts = ((body or {}).get("definition") or {}).get("parts") or []
+        decoded = {}
+        for p in parts:
+            path = p.get("path", "")
+            payload = p.get("payload", "")
+            if p.get("payloadType") == "InlineBase64":
+                try:
+                    decoded[path] = base64.b64decode(payload)
+                except Exception:
+                    decoded[path] = b""
+            else:
+                decoded[path] = (payload or "").encode("utf-8")
+        return decoded
+    except Exception:
+        return None
+
+
+def _is_classic_layout(parts):
+    """Classic (non-PBIR) reports return a root-level 'report.json' (the legacy
+    Report/Layout). PBIR reports place everything under a 'definition/' folder."""
+    return "report.json" in parts and not any(p.startswith("definition/") for p in parts)
+
+
+def _synth_connections_from_pbir(pbir_raw, rpt_id):
+    """Build ServerName/ModelID/Type from definition.pbir's datasetReference,
+    exactly like the PowerShell synthesized Connections file."""
+    info = {"server_name": "", "model_id": "", "conn_type": ""}
+    if not pbir_raw:
+        return info
+    try:
+        pbir = json.loads(bytes(pbir_raw).decode("utf-8-sig"))
+    except Exception:
+        return info
+    ds = pbir.get("datasetReference", {}) or {}
+    conn_string, dataset_id = None, ""
+    by_conn, by_path = ds.get("byConnection"), ds.get("byPath")
+    if by_conn and by_conn.get("connectionString"):
+        conn_string = by_conn.get("connectionString")
+        m = re.search(r"semanticmodelid=([0-9a-fA-F-]+)", conn_string)
+        if m:
+            dataset_id = m.group(1)
+    elif by_path and by_path.get("path"):
+        conn_string = "byPath:" + by_path.get("path")
+    if conn_string:
+        conn_obj = {"Version": "3.0",
+                    "Connections": [{"Name": "EntityDataSource", "ConnectionString": conn_string, "ConnectionType": "pbiServiceLive"}],
+                    "RemoteArtifacts": [{"DatasetId": dataset_id, "ReportId": rpt_id}]}
+        parsed = parse_connections(json.dumps(conn_obj))
+        info.update(server_name=parsed["server_name"], model_id=parsed["model_id"], conn_type=parsed["conn_type"])
+    return info
+
+
+def _classic_bool(v):
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if v is None:
+        return "False"
+    return "True" if str(v).strip().lower() in ("true", "1") else "False"
+
+
+def extract_classic_report_metadata(parts, ws_name, rpt_name, rpt_id, model_id, report_date, result):
+    """Parse a classic (non-PBIR) report definition into the same `result`
+    structure ReportWrapper produces, mapped to the lakehouse table schemas."""
+    raw = parts.get("report.json")
+    layout = None
+    if raw is not None:
+        for enc in ("utf-8-sig", "utf-16-le", "utf-8"):
+            try:
+                layout = json.loads(bytes(raw).decode(enc))
+                break
+            except Exception:
+                layout = None
+    if not isinstance(layout, dict):
+        result["error"] = "Classic report.json missing or invalid"
+        return
+
+    conn = _synth_connections_from_pbir(parts.get("definition.pbir"), rpt_id)
+    mid = model_id or conn.get("model_id", "")
+    out = parse_layout(layout, rpt_name)
+
+    result["connections"].append({"ReportID": rpt_id, "ModelID": mid, "ReportDate": report_date,
+        "ReportName": rpt_name, "Type": conn.get("conn_type", ""), "ServerName": conn.get("server_name", ""),
+        "WorkspaceName": ws_name})
+
+    base = {"ReportName": rpt_name, "ReportID": rpt_id, "ModelID": mid, "ReportDate": report_date, "WorkspaceName": ws_name}
+
+    for p in out["Pages"]:
+        result["pages"].append({**base, "Id": p["Id"], "Name": p["Name"], "Number": int(p["Number"]),
+            "Width": int(p["Width"]), "Height": int(p["Height"]), "HiddenFlag": _classic_bool(p["HiddenFlag"]),
+            "VisualCount": int(p["VisualCount"]), "Type": p["Type"], "DisplayOption": str(p["DisplayOption"]),
+            "DataVisualCount": int(p["DataVisualCount"]), "VisibleVisualCount": int(p["VisibleVisualCount"]),
+            "PageFilterCount": int(p["PageFilterCount"])})
+    for v in out["Visuals"]:
+        result["visuals"].append({**base, "PageName": v["PageName"], "PageId": v["PageId"], "Id": v["Id"],
+            "Name": v["Name"], "Type": v["Type"], "DisplayType": v["DisplayType"], "Title": v["Title"],
+            "SubTitle": v["SubTitle"], "AltText": v["AltText"], "TabOrder": 0, "CustomVisualFlag": _classic_bool(v["CustomVisualFlag"]),
+            "HiddenFlag": _classic_bool(v["HiddenFlag"]), "X": float(v["X"]), "Y": float(v["Y"]), "Z": int(v["Z"]),
+            "Width": float(v["Width"]), "Height": float(v["Height"]), "ObjectCount": int(v["ObjectCount"]),
+            "VisualFilterCount": int(v["VisualFilterCount"]), "DataLimit": int(v["DataLimit"]),
+            "Divider": "False", "RowSubTotals": _classic_bool(v["RowSubTotals"]), "ColumnSubTotals": _classic_bool(v["ColumnSubTotals"]),
+            "DataVisual": _classic_bool(v["DataVisual"]), "HasSparkline": _classic_bool(v["HasSparkline"]), "ParentGroup": v["ParentGroup"]})
+    for b in out["Bookmarks"]:
+        result["bookmarks"].append({**base, "Name": b["Name"], "Id": b["Id"], "PageName": b["PageName"],
+            "PageId": b["PageId"], "VisualId": b["VisualId"], "VisualHiddenFlag": _classic_bool(b["VisualHiddenFlag"]),
+            "SuppressData": _classic_bool(b["SuppressData"]), "CurrentPageSelected": _classic_bool(b["CurrentPageSelected"]),
+            "ApplyVisualDisplayState": _classic_bool(b["ApplyVisualDisplayState"]), "ApplyToAllVisuals": _classic_bool(b["ApplyToAllVisuals"])})
+    for c in out["CustomVisuals"]:
+        result["custom_visuals"].append({**base, "Name": c["Name"]})
+    for f in out["ReportFilters"]:
+        result["report_filters"].append({**base, "displayName": f["displayName"], "TableName": f["TableName"],
+            "ObjectName": f["ObjectName"], "ObjectType": f["ObjectType"], "FilterType": f["FilterType"],
+            "HiddenFilter": _classic_bool(f["HiddenFilter"]), "LockedFilter": _classic_bool(f["LockedFilter"]),
+            "HowCreated": f["HowCreated"], "Used": f["Used"]})
+    for f in out["PageFilters"]:
+        result["page_filters"].append({**base, "PageId": f["PageId"], "PageName": f["PageName"],
+            "displayName": f["displayName"], "TableName": f["TableName"], "ObjectName": f["ObjectName"],
+            "ObjectType": f["ObjectType"], "FilterType": f["FilterType"], "HiddenFilter": _classic_bool(f["HiddenFilter"]),
+            "LockedFilter": _classic_bool(f["LockedFilter"]), "HowCreated": f["HowCreated"], "Used": f["Used"]})
+    for f in out["VisualFilters"]:
+        result["visual_filters"].append({**base, "PageName": f["PageName"], "PageId": f["PageId"], "VisualId": f["VisualId"],
+            "TableName": f["TableName"], "ObjectName": f["ObjectName"], "ObjectType": f["ObjectType"],
+            "FilterType": f["FilterType"], "HiddenFilter": _classic_bool(f["HiddenFilter"]), "LockedFilter": _classic_bool(f["LockedFilter"]),
+            "displayName": f["displayName"], "HowCreated": f["HowCreated"], "Used": f["Used"]})
+    for v in out["VisualObjects"]:
+        result["visual_objects"].append({**base, "PageName": v["PageName"], "PageId": v["PageId"], "VisualId": v["VisualId"],
+            "VisualName": v["VisualName"], "VisualType": v["VisualType"], "CustomVisualFlag": _classic_bool(v["CustomVisualFlag"]),
+            "TableName": v["TableName"], "ObjectName": v["ObjectName"], "ObjectType": v["ObjectType"], "Source": v["Source"],
+            "displayName": v["displayName"], "ImplicitMeasure": _classic_bool(v["ImplicitMeasure"]), "Sparkline": _classic_bool(v["Sparkline"]),
+            "VisualCalc": _classic_bool(v["VisualCalc"]), "Format": v["Format"]})
+    for m in out["ReportLevelMeasures"]:
+        result["report_level_measures"].append({**base, "TableName": m["TableName"], "ObjectName": m["ObjectName"],
+            "ObjectType": m["ObjectType"], "Expression": m["Expression"], "HiddenFlag": _classic_bool(m["HiddenFlag"]),
+            "FormatString": m["FormatString"], "DataType": "", "DataCategory": ""})
+    for vi in out["VisualInteractions"]:
+        result["visual_interactions"].append({**base, "PageName": vi["PageName"], "PageId": vi["PageId"],
+            "SourceVisualID": vi["SourceVisualID"], "TargetVisualID": vi["TargetVisualID"],
+            "SourceVisualName": vi["SourceVisualName"], "TargetVisualName": vi["TargetVisualName"],
+            "TypeID": str(vi["TypeID"]), "Type": vi["Type"]})
+
+
 # ==============================================================  
 # PARALLEL REPORT EXTRACTION HELPER
 # ==============================================================
 
-def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
-    """Extract metadata for a single report using ReportWrapper"""
+def extract_report_metadata(ws_name, ws_id, rpt_name, rpt_id, model_id, report_date):
+    """Extract metadata for a single report.
+
+    ReportWrapper is the primary path and handles PBIR reports. It internally
+    reads the report definition (the same getDefinition API) and raises for
+    classic (non-PBIR) reports - typically an "only supported on PBIR" style
+    error. When that happens we fall back to fetching the definition ourselves
+    and parsing the legacy 'report.json' with the embedded classic parser.
+
+    The fallback is gated by _is_classic_layout(), so a genuine PBIR failure for
+    any other reason is preserved as the original error rather than being
+    mis-parsed. Doing it this way avoids a redundant getDefinition call for the
+    common PBIR case (ReportWrapper already makes it)."""
     result = {
         'connections': [],
         'pages': [],
@@ -1855,7 +2321,30 @@ def extract_report_metadata(ws_name, rpt_name, rpt_id, model_id, report_date):
                 })
     
     except Exception as e:
-        result['error'] = str(e)
+        # ReportWrapper failed. For a classic (non-PBIR) report this is the
+        # expected signal ("...only supported on PBIR..."). Fetch the report
+        # definition via the Fabric getDefinition API and, if it is the legacy
+        # layout, parse it with the embedded classic parser. _is_classic_layout
+        # gates this, so a genuine PBIR failure for any other reason is kept as
+        # the original error instead of being mis-handled.
+        parts = None
+        try:
+            parts = _get_report_definition_parts(ws_id, rpt_id)
+        except Exception:
+            parts = None
+
+        if parts is not None and _is_classic_layout(parts):
+            # Discard any partial PBIR data captured before the failure.
+            for _k in result:
+                if _k != 'error':
+                    result[_k] = []
+            result['error'] = None
+            try:
+                extract_classic_report_metadata(parts, ws_name, rpt_name, rpt_id, model_id, report_date, result)
+            except Exception as ce:
+                result['error'] = f"Classic parse failed: {ce}"
+        else:
+            result['error'] = str(e)
     
     return result
 
@@ -1879,7 +2368,7 @@ log("")
 # ==============================================================
 
 # Collect all report tasks across all workspaces first
-all_report_tasks = []  # (ws_name, rpt_name, rpt_id, model_id)
+all_report_tasks = []  # (ws_name, ws_id, rpt_name, rpt_id, model_id)
 
 if not EXTRACT_REPORT_METADATA:
     log("\nSkipping report metadata extraction (EXTRACT_REPORT_METADATA=False)")
@@ -1887,6 +2376,7 @@ if not EXTRACT_REPORT_METADATA:
 else:
     for ws_row in workspaces_df.itertuples(index=False):
         ws_name = ws_row.Name
+        ws_id = getattr(ws_row, "Id", None)
         log(f"\nScanning workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
 
         try:
@@ -1914,7 +2404,7 @@ else:
                     except Exception:
                         model_id = ""
                 
-                all_report_tasks.append((ws_name, rpt_name, rpt_id, model_id))
+                all_report_tasks.append((ws_name, ws_id, rpt_name, rpt_id, model_id))
 
         except Exception as e:
             log(f"ERROR accessing workspace {ws_name}: {e}")
@@ -1929,8 +2419,8 @@ elif all_report_tasks:
     
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL_WORKERS) as executor:
         futures = {
-            executor.submit(extract_report_metadata, ws_name, rpt_name, rpt_id, model_id, REPORT_DATE): (ws_name, rpt_name)
-            for ws_name, rpt_name, rpt_id, model_id in all_report_tasks
+            executor.submit(extract_report_metadata, ws_name, ws_id, rpt_name, rpt_id, model_id, REPORT_DATE): (ws_name, rpt_name)
+            for ws_name, ws_id, rpt_name, rpt_id, model_id in all_report_tasks
         }
         
         completed = 0
@@ -2030,434 +2520,6 @@ log("="*80)
 
 
 # In[4]:
-
-
-# ================================
-# FABRIC DATAFLOW DETAIL EXTRACTOR
-# WITH AUTO-SCHEMA CREATION
-# ================================
-#
-# This notebook extracts dataflow detail metadata (queries/entities)
-# using Fabric REST APIs, similar to the PowerShell script from:
-# https://github.com/chris1642/Power-BI-Backup-Impact-Analysis-Governance-Solution
-#
-# EXTRACTED DATA (written to lakehouse tables):
-# 1. DataflowDetail - dataflow queries with M expressions
-#
-# Column names match the PowerShell script output:
-# - Dataflow ID
-# - Dataflow Name
-# - Query Name
-# - Query (M expression)
-# - Report Date
-# - Workspace Name - Dataflow Name
-# ================================
-
-# %pip install semantic-link-labs --quiet
-
-import time, re, pandas as pd, json, base64
-from datetime import datetime
-import sempy.fabric as fabric
-from sempy.fabric import FabricRestClient
-
-# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES
-
-EXTRACTION_TIMESTAMP = datetime.now()
-REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
-start_time = time.time()
-
-# -----------------------------------
-# Logging helpers
-# -----------------------------------
-def log(msg):
-    print(msg, flush=True)
-
-def elapsed_min():
-    return (time.time() - start_time) / 60
-
-# Heartbeat
-import threading
-heartbeat_running = True
-def heartbeat():
-    while heartbeat_running:
-        time.sleep(1000)
-        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
-
-threading.Thread(target=heartbeat, daemon=True).start()
-
-# -----------------------------------
-# Start banner
-# -----------------------------------
-log("="*80)
-log("FABRIC DATAFLOW DETAIL EXTRACTION")
-log(f"Started: {EXTRACTION_TIMESTAMP}")
-log("="*80)
-
-# ============================================
-# AUTO-CREATE SCHEMA (LAKEHOUSE)
-# ============================================
-CATALOG = spark.sql("SELECT current_catalog()").first()[0]
-log(f"Using catalog: {CATALOG}")
-
-schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
-log(f"Ensuring lakehouse schema exists: {schema_name}")
-
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-log(f"✓ Schema is ready: {schema_name}\n")
-
-# ==============================================================  
-
-
-# ==============================================================  
-# COLLECTIONS & SCHEMA TEMPLATES
-# ==============================================================
-# Each collection includes a template row that defines the schema.
-# This ensures empty tables can be created with correct column structure.
-# Schema matches the PowerShell script output from Final PS Script.txt
-
-all_dataflow_details = [{
-    "DataflowId": "",
-    "DataflowName": "",
-    "QueryName": "",
-    "Query": "",
-    "ReportDate": "",
-    "WorkspaceName": "",
-    "WorkspaceNameDataflowName": ""
-}]
-
-# ==============================================================  
-# HELPER FUNCTIONS
-# ==============================================================
-
-def clean_name(name):
-    """Clean up names for file/display purposes (matches PowerShell script pattern)"""
-    clean = name.replace('[', '(').replace(']', ')')
-    clean = re.sub(r'[^a-zA-Z0-9\(\)&,.\- ]', ' ', clean)
-    return clean.strip()
-
-def parse_power_query_document(document_content, dataflow_id, dataflow_name, workspace_name, report_date):
-    """
-    Parse Power Query document content to extract queries.
-    Handles both Gen1 and Gen2 dataflow document formats.
-    
-    Args:
-        document_content: The Power Query M document content
-        dataflow_id: Dataflow ID
-        dataflow_name: Dataflow name
-        workspace_name: Workspace name
-        report_date: Report date
-    
-    Returns:
-        List of query dictionaries
-    """
-    queries = []
-    
-    clean_workspace_name = clean_name(workspace_name)
-    clean_dataflow_name = clean_name(dataflow_name)
-    workspace_dataflow_name = f"{clean_workspace_name} ~ {clean_dataflow_name}"
-    
-    # Unescape content if needed (Gen1 dataflows have escaped content)
-    document_content = document_content.replace('\\r\\n', '\n').replace('\\n', '\n')
-    document_content = document_content.replace('\\"', '"')
-    
-    # Split by "section Section1;" to get the queries section
-    sections = document_content.split('section Section1;', 1)
-    
-    if len(sections) < 2:
-        return queries
-    
-    queries_section = sections[1]
-    
-    # Use regex to find all queries in Power Query M document format
-    # Pattern breakdown:
-    #   (?s)                           - DOTALL mode: dot matches newlines
-    #   (?:\[[^\]]*\]\s*)?             - Optional metadata annotations like [IsEnabled=false]
-    #   shared\s+                       - "shared" keyword followed by whitespace
-    #   (?:#"(.*?)"|([A-Za-z_]\w*))    - Query name: either #"quoted name" (group 1) or unquoted identifier (group 2)
-    #   \s*=\s*                         - Assignment operator with optional whitespace
-    #   (.*?)                           - Query expression (group 3) - non-greedy capture
-    #   (?=...)                         - Lookahead: stop before next "shared" keyword or end of string
-    # Supports both: shared QueryName = ... and shared #"Query Name With Spaces" = ...
-    pattern = r'(?s)(?:\[[^\]]*\]\s*)?shared\s+(?:#"(.*?)"|([A-Za-z_]\w*))\s*=\s*(.*?)(?=(?:\[[^\]]*\]\s*)?shared\s+(?:#"(?:.*?)"|[A-Za-z_]\w*)\s*=|$)'
-    matches = re.findall(pattern, queries_section)
-    
-    for match in matches:
-        # Group 0 = hash-quoted name, Group 1 = unquoted name, Group 2 = expression
-        query_name = match[0] if match[0] else match[1]
-        query_expression = match[2].strip()
-        
-        # Remove trailing semicolons
-        query_expression = re.sub(r';\s*$', '', query_expression).strip()
-        
-        # Skip if empty
-        if not query_name or not query_expression:
-            continue
-        
-        queries.append({
-            "DataflowId": dataflow_id,
-            "DataflowName": dataflow_name,
-            "QueryName": query_name,
-            "Query": query_expression,
-            "ReportDate": report_date,
-            "WorkspaceName": workspace_name,
-            "WorkspaceNameDataflowName": workspace_dataflow_name
-        })
-    
-    return queries
-
-def extract_gen2_dataflow(client, workspace_id, dataflow_id, dataflow_name, workspace_name, report_date):
-    """
-    Extract Gen2 (Fabric) dataflow definition using getDefinition API.
-    
-    Args:
-        client: FabricRestClient instance
-        workspace_id: Workspace ID
-        dataflow_id: Dataflow ID
-        dataflow_name: Dataflow name
-        workspace_name: Workspace name
-        report_date: Report date
-    
-    Returns:
-        List of query dictionaries
-    """
-    queries = []
-    
-    try:
-        # Use Fabric API to get dataflow definition
-        endpoint = f"v1/workspaces/{workspace_id}/dataflows/{dataflow_id}/getDefinition"
-        response = client.post(endpoint, json={})
-        
-        if response.status_code != 200:
-            return queries
-        
-        response_data = response.json()
-        
-        if not response_data.get('definition', {}).get('parts'):
-            return queries
-        
-        # Find the .pq file in the parts
-        for part in response_data['definition']['parts']:
-            file_path = part.get('path', '')
-            payload_type = part.get('payloadType', '')
-            payload = part.get('payload', '')
-            
-            if file_path.endswith('.pq') and payload_type == 'InlineBase64':
-                # Decode Base64 content
-                try:
-                    decoded_bytes = base64.b64decode(payload)
-                    pq_content = decoded_bytes.decode('utf-8')
-                    
-                    # Parse the Power Query document
-                    queries = parse_power_query_document(
-                        pq_content,
-                        dataflow_id,
-                        dataflow_name,
-                        workspace_name,
-                        report_date
-                    )
-                    break
-                except Exception as e:
-                    log(f"      Error decoding Gen2 dataflow content: {e}")
-    
-    except Exception as e:
-        log(f"    Could not extract Gen2 dataflow {dataflow_name}: {e}")
-    
-    return queries
-
-def extract_gen1_dataflow(client, workspace_id, dataflow_id, dataflow_name, workspace_name, report_date):
-    """
-    Extract Gen1 (Power BI) dataflow definition using REST API.
-    
-    Args:
-        client: FabricRestClient instance
-        workspace_id: Workspace ID
-        dataflow_id: Dataflow ID
-        dataflow_name: Dataflow name
-        workspace_name: Workspace name
-        report_date: Report date
-    
-    Returns:
-        List of query dictionaries
-    """
-    queries = []
-    
-    try:
-        # Use Power BI API to get dataflow definition
-        api_url = f"v1.0/myorg/groups/{workspace_id}/dataflows/{dataflow_id}"
-        response = client.get(api_url)
-        
-        if response.status_code != 200:
-            return queries
-        
-        dataflow_json = response.json()
-        
-        # Check for pbi:mashup document content
-        if 'pbi:mashup' not in dataflow_json or 'document' not in dataflow_json['pbi:mashup']:
-            return queries
-        
-        document_content = dataflow_json['pbi:mashup']['document']
-        
-        # Parse the Power Query document
-        queries = parse_power_query_document(
-            document_content,
-            dataflow_id,
-            dataflow_name,
-            workspace_name,
-            report_date
-        )
-    
-    except Exception as e:
-        log(f"    Could not extract Gen1 dataflow {dataflow_name}: {e}")
-    
-    return queries
-
-# ==============================================================  
-# GET WORKSPACES
-# ==============================================================
-
-workspaces_df = fabric.list_workspaces()
-
-if not SCAN_ALL_WORKSPACES:
-    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
-    if workspaces_df.empty:
-        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
-    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
-
-log(f"Workspace count: {len(workspaces_df)}")
-log("")
-
-# Create REST client instance
-client = FabricRestClient()
-
-# ==============================================================  
-# DATAFLOW DETAIL EXTRACTION (PARALLELIZED)
-# ==============================================================
-
-# Collect all dataflow tasks across workspaces first, then process in parallel
-dataflow_extract_tasks = []  # (gen, client, ws_id, df_id, df_name, ws_name, report_date)
-
-for ws_row in workspaces_df.itertuples(index=False):
-    ws_name = ws_row.Name
-    ws_id = ws_row.Id
-    log(f"\nScanning workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
-
-    # -------------------- Gen1 Dataflows (Power BI API) --------------------
-    try:
-        dataflows_url = f"v1.0/myorg/groups/{ws_id}/dataflows"
-        response = client.get(dataflows_url)
-        
-        if response.status_code == 200:
-            dataflows = response.json().get('value', [])
-            log(f"  Gen1 Dataflows found: {len(dataflows)}")
-            for dataflow in dataflows:
-                dataflow_extract_tasks.append(("gen1", ws_id, dataflow.get('objectId', ''), dataflow.get('name', ''), ws_name))
-        else:
-            log(f"  No Gen1 dataflows found")
-    except Exception as e:
-        log(f"  ERROR fetching Gen1 dataflows: {e}")
-
-    # -------------------- Gen2 Dataflows (Fabric API) --------------------
-    try:
-        items_url = f"v1/workspaces/{ws_id}/items"
-        response = client.get(items_url)
-        
-        if response.status_code == 200:
-            items = response.json().get('value', [])
-            gen2_dataflows = [item for item in items if item.get('type') == 'Dataflow']
-            log(f"  Gen2 Dataflows found: {len(gen2_dataflows)}")
-            for dataflow in gen2_dataflows:
-                dataflow_extract_tasks.append(("gen2", ws_id, dataflow.get('id', ''), dataflow.get('displayName', ''), ws_name))
-        else:
-            log(f"  No Gen2 dataflows found")
-    except Exception as e:
-        log(f"  ERROR fetching Gen2 dataflows: {e}")
-
-# Process all dataflow extractions in parallel
-def extract_dataflow_task(task):
-    gen, w_id, df_id, df_name, w_name = task
-    if gen == "gen1":
-        return extract_gen1_dataflow(client, w_id, df_id, df_name, w_name, REPORT_DATE)
-    else:
-        return extract_gen2_dataflow(client, w_id, df_id, df_name, w_name, REPORT_DATE)
-
-if dataflow_extract_tasks:
-    log(f"\nExtracting {len(dataflow_extract_tasks)} dataflows in parallel (max {MAX_PARALLEL_WORKERS} workers)...")
-    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_WORKERS) as executor:
-        futures = {
-            executor.submit(extract_dataflow_task, task): task
-            for task in dataflow_extract_tasks
-        }
-        for future in as_completed(futures):
-            task = futures[future]
-            df_name = task[3]
-            try:
-                queries = future.result()
-                if queries:
-                    all_dataflow_details.extend(queries)
-                    log(f"  ✓ {df_name}: {len(queries)} queries")
-                else:
-                    log(f"  ✓ {df_name}: no queries")
-            except Exception as e:
-                log(f"  ERROR extracting {df_name}: {e}")
-else:
-    log("No dataflows to extract.")
-
-# ==============================================================  
-# WRITE TO LAKEHOUSE
-# ==============================================================
-
-log("\n" + "="*80)
-log("Writing output to Lakehouse")
-log("="*80)
-
-def write_table(data, name):
-    """
-    Write data to a Delta table. Schema is inferred from the first row (template).
-    Creates empty table with schema if only template row exists.
-    
-    Args:
-        data: List of dictionaries containing the data (first row is schema template)
-        name: Name of the table
-    """
-    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
-    
-    # Check if we only have the template row (length 1 means just the schema template)
-    if len(data) == 1:
-        log(f"⚠ No data for {name}, creating empty table with schema")
-        # Use template to create empty DataFrame with correct schema
-        df = spark.createDataFrame(pd.DataFrame(data))
-        # Filter out the template row to create truly empty table
-        empty_df = df.filter("1=0")
-        empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
-        log(f"✓ Created empty table: {full_name}\n")
-        return
-
-    # Skip the template row (first row) and create DataFrame with actual data
-    pandas_df = pd.DataFrame(data)
-    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
-
-    log(f"Writing {len(data) - 1} rows → {full_name}")
-
-    actual_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
-
-    log(f"✓ Wrote table: {full_name}\n")
-
-write_table(all_dataflow_details, "DataflowDetail")
-
-# ==============================================================  
-# END
-# ==============================================================
-
-heartbeat_running = False
-
-log("\n" + "="*80)
-log("DATA EXTRACTION COMPLETE")
-log(f"Finished at: {datetime.now()}")
-log(f"Total runtime: {elapsed_min():.2f} minutes")
-log("="*80)
-
-
-# In[5]:
 
 
 # ================================
