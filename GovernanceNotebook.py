@@ -217,7 +217,7 @@ ALL_TABLE_SCHEMAS = {
     "DataflowLineage": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DatasetId": "", "DatasetName": ""},
     "DataflowSourcesInfo": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowDatasourceType": "", "DataflowDatasourceId": "", "DataflowDatasourceGatewayId": "", "DataflowDatasourceConnectionDetails": ""},
     "DataflowRefreshHistory": {"WorkspaceId": "", "WorkspaceName": "", "DataflowId": "", "DataflowName": "", "DataflowRefreshRequestId": "", "DataflowRefreshId": "", "DataflowRefreshStartTime": "", "DataflowRefreshEndTime": "", "DataflowRefreshStatus": "", "DataflowRefreshType": "", "DataflowErrorInfo": ""},
-    "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportType": "", "DatasetId": "", "DatasetName": ""},
+    "Reports": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "ReportDescription": "", "ReportWebUrl": "", "ReportEmbedUrl": "", "ReportIsFromPbix": "", "ReportIsOwnedByMe": "", "ReportType": "", "format": "", "DatasetId": "", "DatasetWorkspaceId": "", "DatasetName": "", "users": "", "subscriptions": ""},
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
     "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
     "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""},
@@ -624,37 +624,50 @@ for ws_info in workspaces_info:
     except Exception as e:
         log(f"  ERROR fetching Fabric items: {e}")
 
-    # -------------------- REPORTS (with parallel page fetching) --------------------
+    # -------------------- REPORTS (REST, with parallel page fetching) --------------------
+    # Uses the raw Power BI REST API (like the PowerShell script) so EVERY report
+    # field is captured - including isFromPbix, isOwnedByMe, format, datasetWorkspaceId
+    # and passthrough fields (users, subscriptions) - rather than the curated subset
+    # returned by fabric.list_reports().
     try:
         log(f"  Fetching reports...")
-        reports_df = fabric.list_reports(workspace=ws_name)
-        
-        if reports_df is not None and not reports_df.empty:
-            log(f"  Reports found: {len(reports_df)}")
-            
+        reports_value = []
+        reports_resp = client.get(f"v1.0/myorg/groups/{ws_id}/reports")
+        if reports_resp.status_code == 200:
+            reports_value = reports_resp.json().get("value", [])
+
+        if reports_value:
+            log(f"  Reports found: {len(reports_value)}")
+
             # Collect report info and page tasks
             page_tasks = []
-            for _, rpt_row in reports_df.iterrows():
-                report_id = safe_get(rpt_row, "Id")
-                report_name = safe_get(rpt_row, "Name")
-                dataset_id = safe_get(rpt_row, "Dataset Id")
-                
+            for rpt in reports_value:
+                report_id = rpt.get("id", "")
+                report_name = rpt.get("name", "")
+                dataset_id = rpt.get("datasetId", "")
+
                 # Get dataset name from lookup
                 dataset_name = dataset_name_lookup.get(dataset_id, "Unknown Dataset")
-                
+
                 reports_info.append({
                     "WorkspaceId": ws_id,
                     "WorkspaceName": ws_name,
                     "ReportId": report_id,
                     "ReportName": report_name,
-                    "ReportDescription": safe_get(rpt_row, "Description"),
-                    "ReportWebUrl": safe_get(rpt_row, "Web URL"),
-                    "ReportEmbedUrl": safe_get(rpt_row, "Embed URL"),
-                    "ReportType": safe_get(rpt_row, "Report Type"),
+                    "ReportDescription": rpt.get("description", ""),
+                    "ReportWebUrl": rpt.get("webUrl", ""),
+                    "ReportEmbedUrl": rpt.get("embedUrl", ""),
+                    "ReportIsFromPbix": str(bool(rpt.get("isFromPbix", False))),
+                    "ReportIsOwnedByMe": str(bool(rpt.get("isOwnedByMe", False))),
+                    "ReportType": rpt.get("reportType", ""),
+                    "format": rpt.get("format", ""),
                     "DatasetId": dataset_id,
-                    "DatasetName": dataset_name
+                    "DatasetWorkspaceId": rpt.get("datasetWorkspaceId", ""),
+                    "DatasetName": dataset_name,
+                    "users": serialize_json(rpt.get("users")),
+                    "subscriptions": serialize_json(rpt.get("subscriptions"))
                 })
-                
+
                 page_tasks.append((report_id, report_name))
             
             # Fetch all report pages in parallel
