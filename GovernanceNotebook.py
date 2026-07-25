@@ -3126,6 +3126,490 @@ log("="*80)
 
 
 # ================================
+# MODEL COLUMN STATS EXTRACTOR
+# ================================
+#
+# This cell extracts column-level storage statistics from semantic models
+# using DMV queries via the XMLA endpoint. It collects:
+# - Column cardinality and segment information
+# - Data size, dictionary size, and hierarchy size
+# - Temperature and access patterns for hybrid tables
+# - Percentage of table and database size
+# - Data type and encoding type
+# - Row count per table
+#
+# Data is collected from all datasets across all target workspaces
+# and written to a single ModelColumnStats table.
+# ================================
+
+import time, re, pandas as pd
+from datetime import datetime
+import sempy.fabric as fabric
+
+# Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES
+
+EXTRACTION_TIMESTAMP = datetime.now()
+REPORT_DATE = EXTRACTION_TIMESTAMP.strftime("%Y-%m-%d")
+start_time = time.time()
+
+# -----------------------------------
+# Logging helpers
+# -----------------------------------
+def log(msg):
+    print(msg, flush=True)
+
+def elapsed_min():
+    return (time.time() - start_time) / 60
+
+# Heartbeat
+import threading
+heartbeat_running = True
+def heartbeat():
+    while heartbeat_running:
+        time.sleep(10)
+        print(f"[Heartbeat] Still running… elapsed {elapsed_min():.2f} min", flush=True)
+
+threading.Thread(target=heartbeat, daemon=True).start()
+
+# -----------------------------------
+# Start banner
+# -----------------------------------
+log("="*80)
+log("MODEL COLUMN STATS EXTRACTION")
+log(f"Started: {EXTRACTION_TIMESTAMP}")
+log("="*80)
+
+# ============================================
+# AUTO-CREATE SCHEMA (LAKEHOUSE)
+# ============================================
+CATALOG = spark.sql("SELECT current_catalog()").first()[0]
+log(f"Using catalog: {CATALOG}")
+
+schema_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}"
+log(f"Ensuring lakehouse schema exists: {schema_name}")
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+log(f"✓ Schema is ready: {schema_name}\n")
+
+
+# ==============================================================
+# COLLECTION & SCHEMA TEMPLATE
+# ==============================================================
+# The template row defines the schema for empty table creation.
+
+all_column_stats = [{
+    "ColumnStatsId": "",
+    "WorkspaceName": "",
+    "DatasetName": "",
+    "DatasetId": "",
+    "TableName": "",
+    "ColumnName": "",
+    "DataType": "",
+    "EncodingType": "",
+    "RowCount": 0,
+    "Cardinality": 0,
+    "TotalSize": 0,
+    "DataSize": 0,
+    "DictionarySize": 0,
+    "HierarchySize": 0,
+    "PctTable": 0.0,
+    "PctDatabase": 0.0,
+    "Segments": 0,
+    "PageableSegments": 0,
+    "ResidentSegments": 0,
+    "Temperature": 0.0,
+    "LastAccessed": None,
+    "ReportDate": ""
+}]
+
+# ==============================================================
+# UNIQUE ID GENERATION
+# ==============================================================
+import hashlib
+
+def generate_column_stats_id(workspace_name: str, dataset_id: str, table_name: str, column_name: str, report_date: str) -> str:
+    """
+    Generate a unique identifier for a column stats row.
+    Uses SHA-256 hash of the composite key truncated to 32 chars for readability.
+    """
+    composite_key = f"{workspace_name}|{dataset_id}|{table_name}|{column_name}|{report_date}"
+    return hashlib.sha256(composite_key.encode()).hexdigest()[:32]
+
+# ==============================================================
+# SAFE TYPE CONVERSION HELPERS
+# ==============================================================
+# These handle pd.NA, np.nan, None, and other NA-like values that cause
+# "boolean value of NA is ambiguous" errors when using `val or default`.
+
+def safe_int(val, default: int = 0) -> int:
+    """
+    Safely convert a value to int, handling NA/NaN/None/pd.NA.
+    
+    Args:
+        val: Value to convert (may be int, float, NA, NaN, None, or pd.NA)
+        default: Default value if conversion fails
+    
+    Returns:
+        Integer value or default
+    """
+    if val is None:
+        return default
+    if pd.isna(val):
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_float(val, default: float = 0.0) -> float:
+    """
+    Safely convert a value to float, handling NA/NaN/None/pd.NA.
+    
+    Args:
+        val: Value to convert (may be int, float, NA, NaN, None, or pd.NA)
+        default: Default value if conversion fails
+    
+    Returns:
+        Float value or default
+    """
+    if val is None:
+        return default
+    if pd.isna(val):
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+# ==============================================================
+# DMV QUERY FUNCTION
+# ==============================================================
+
+def query_dmv(dataset: str, workspace: str, dmv_name: str) -> pd.DataFrame:
+    """Execute a DMV query against the semantic model via XMLA endpoint."""
+    dmv_dax_map = {
+        "DISCOVER_STORAGE_TABLE_COLUMNS": "INFO.STORAGETABLECOLUMNS()",
+        "DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS": "INFO.STORAGETABLECOLUMNSEGMENTS()",
+    }
+
+    dax_function = dmv_dax_map.get(dmv_name)
+    if not dax_function:
+        raise ValueError(f"Unknown DMV: {dmv_name}")
+
+    df = fabric.evaluate_dax(
+        dataset=dataset,
+        workspace=workspace,
+        dax_string=f"EVALUATE {dax_function}"
+    )
+    return df
+
+def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove brackets from column names."""
+    df.columns = [col.replace("[", "").replace("]", "") for col in df.columns]
+    return df
+
+# ==============================================================
+# COLUMN STATS EXTRACTION FUNCTION
+# ==============================================================
+
+def extract_column_stats(workspace_name: str, dataset_name: str, dataset_id: str, report_date: str) -> list:
+    """
+    Extract column-level storage statistics from a semantic model.
+
+    Returns a list of dictionaries with column stats, or empty list on error.
+    """
+    results = []
+
+    try:
+        # Query DMVs
+        df_storage_columns = query_dmv(dataset_name, workspace_name, "DISCOVER_STORAGE_TABLE_COLUMNS")
+        df_segments = query_dmv(dataset_name, workspace_name, "DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS")
+
+        if df_storage_columns.empty and df_segments.empty:
+            log(f"      No storage data available")
+            return results
+
+        # Clean column names
+        df_storage_columns = clean_column_names(df_storage_columns)
+        df_segments = clean_column_names(df_segments)
+
+        # Aggregate segments to column level (across all partitions)
+        # Note: We group by DIMENSION_NAME + COLUMN_ID only, not TABLE_ID,
+        # because TABLE_ID represents partitions and we want logical column totals
+        if not df_segments.empty:
+            df_segments_agg = df_segments.groupby(
+                ["DIMENSION_NAME", "COLUMN_ID"],
+                as_index=False
+            ).agg({
+                "USED_SIZE": "sum",
+                "SEGMENT_NUMBER": "count",
+                "RECORDS_COUNT": "sum",
+                "TEMPERATURE": "max",
+                "LAST_ACCESSED": "max",
+                "ISPAGEABLE": "sum",
+                "ISRESIDENT": "sum",
+            }).rename(columns={
+                "USED_SIZE": "data_size",
+                "SEGMENT_NUMBER": "segment_count",
+                "RECORDS_COUNT": "records_count",
+                "TEMPERATURE": "temperature",
+                "LAST_ACCESSED": "last_accessed",
+                "ISPAGEABLE": "pageable_segments",
+                "ISRESIDENT": "resident_segments",
+            })
+        else:
+            df_segments_agg = pd.DataFrame(columns=[
+                "DIMENSION_NAME", "COLUMN_ID", "data_size",
+                "segment_count", "records_count", "temperature", "last_accessed",
+                "pageable_segments", "resident_segments"
+            ])
+
+        # Aggregate storage columns (dictionary info, data type, encoding)
+        # Note: We group by DIMENSION_NAME + COLUMN_ID only, not TABLE_ID,
+        # to combine data across all partitions of the same logical table
+        if not df_storage_columns.empty:
+            # Build aggregation dict dynamically based on available columns
+            agg_dict = {
+                "DICTIONARY_SIZE": "sum",
+                "ATTRIBUTE_NAME": "first",
+            }
+            # Add optional columns if they exist in the DataFrame
+            if "DATATYPE" in df_storage_columns.columns:
+                agg_dict["DATATYPE"] = "first"
+            if "COLUMN_ENCODING" in df_storage_columns.columns:
+                agg_dict["COLUMN_ENCODING"] = "first"
+            
+            df_dict_agg = df_storage_columns.groupby(
+                ["DIMENSION_NAME", "COLUMN_ID"],
+                as_index=False
+            ).agg(agg_dict)
+            
+            # Rename columns
+            rename_dict = {
+                "DICTIONARY_SIZE": "dictionary_size",
+                "ATTRIBUTE_NAME": "column_name",
+            }
+            if "DATATYPE" in df_dict_agg.columns:
+                rename_dict["DATATYPE"] = "data_type"
+            if "COLUMN_ENCODING" in df_dict_agg.columns:
+                rename_dict["COLUMN_ENCODING"] = "encoding_type"
+            
+            df_dict_agg = df_dict_agg.rename(columns=rename_dict)
+        else:
+            df_dict_agg = pd.DataFrame(columns=[
+                "DIMENSION_NAME", "COLUMN_ID", "dictionary_size", "column_name",
+                "data_type", "encoding_type"
+            ])
+
+        # Join segments and dictionary info
+        if df_segments_agg.empty and df_dict_agg.empty:
+            return results
+            
+        df_result = df_segments_agg.merge(
+            df_dict_agg,
+            how="outer",
+            on=["DIMENSION_NAME", "COLUMN_ID"]
+        )
+
+        # Ensure data_type and encoding_type columns exist
+        if "data_type" not in df_result.columns:
+            df_result["data_type"] = ""
+        if "encoding_type" not in df_result.columns:
+            df_result["encoding_type"] = ""
+        
+        # Calculate row count per table (max of records_count across columns in the table)
+        # This represents the actual row count of the table
+        df_table_rows = df_result.groupby("DIMENSION_NAME", as_index=False).agg({
+            "records_count": "max"
+        }).rename(columns={"records_count": "table_row_count"})
+        df_result = df_result.merge(df_table_rows, on="DIMENSION_NAME", how="left")
+
+        # Fill NA values explicitly using pd.to_numeric to handle pd.NA properly
+        # This avoids "boolean value of NA is ambiguous" errors
+        df_result["data_size"] = pd.to_numeric(df_result.get("data_size"), errors="coerce").fillna(0).astype("int64")
+        df_result["dictionary_size"] = pd.to_numeric(df_result.get("dictionary_size"), errors="coerce").fillna(0).astype("int64")
+        df_result["segment_count"] = pd.to_numeric(df_result.get("segment_count"), errors="coerce").fillna(0).astype("int64")
+        df_result["records_count"] = pd.to_numeric(df_result.get("records_count"), errors="coerce").fillna(0).astype("int64")
+        df_result["pageable_segments"] = pd.to_numeric(df_result.get("pageable_segments"), errors="coerce").fillna(0).astype("int64")
+        df_result["resident_segments"] = pd.to_numeric(df_result.get("resident_segments"), errors="coerce").fillna(0).astype("int64")
+        df_result["temperature"] = pd.to_numeric(df_result.get("temperature"), errors="coerce").fillna(0.0).astype("float64")
+        df_result["table_row_count"] = pd.to_numeric(df_result.get("table_row_count"), errors="coerce").fillna(0).astype("int64")
+        
+        df_result["hier_size"] = 0
+
+        df_result["total_size"] = (
+            df_result["data_size"] +
+            df_result["dictionary_size"] +
+            df_result["hier_size"]
+        )
+
+        # Calculate percentages
+        total_db_size = df_result["total_size"].sum()
+        if total_db_size > 0:
+            df_result["pct_database"] = (df_result["total_size"] / total_db_size * 100).round(2)
+        else:
+            df_result["pct_database"] = 0.0
+
+        # Table-level totals for % Table
+        df_table_sizes = df_result.groupby("DIMENSION_NAME", as_index=False).agg({
+            "total_size": "sum"
+        }).rename(columns={"total_size": "table_total_size"})
+
+        df_result = df_result.merge(df_table_sizes, on="DIMENSION_NAME", how="left")
+        
+        # Calculate pct_table using safe_float to avoid NA ambiguity in lambda
+        df_result["pct_table"] = df_result.apply(
+            lambda row: round(safe_float(row["total_size"]) / safe_float(row["table_total_size"], 1) * 100, 2)
+            if safe_float(row["table_total_size"]) > 0 else 0.0,
+            axis=1
+        )
+
+        # Clean table names (remove H$ prefix and partition suffixes)
+        df_result["table_name"] = df_result["DIMENSION_NAME"].str.replace(r"^H\$", "", regex=True)
+        df_result["table_name"] = df_result["table_name"].str.replace(r"\s*\(\d+\).*$", "", regex=True)
+        df_result["column_name"] = df_result["column_name"].fillna(df_result["COLUMN_ID"].astype(str))
+
+        # Build results using safe conversion functions
+        for _, row in df_result.iterrows():
+            table_name = row.get("table_name", "") or ""
+            column_name = row.get("column_name", "") or ""
+            column_stats_id = generate_column_stats_id(workspace_name, dataset_id, table_name, column_name, report_date)
+
+            results.append({
+                "ColumnStatsId": column_stats_id,
+                "WorkspaceName": workspace_name,
+                "DatasetName": dataset_name,
+                "DatasetId": dataset_id,
+                "TableName": table_name,
+                "ColumnName": column_name,
+                "DataType": str(row.get("data_type", "") or ""),
+                "EncodingType": str(row.get("encoding_type", "") or ""),
+                "RowCount": safe_int(row.get("table_row_count")),
+                "Cardinality": safe_int(row.get("records_count")),
+                "TotalSize": safe_int(row.get("total_size")),
+                "DataSize": safe_int(row.get("data_size")),
+                "DictionarySize": safe_int(row.get("dictionary_size")),
+                "HierarchySize": safe_int(row.get("hier_size")),
+                "PctTable": safe_float(row.get("pct_table")),
+                "PctDatabase": safe_float(row.get("pct_database")),
+                "Segments": safe_int(row.get("segment_count")),
+                "PageableSegments": safe_int(row.get("pageable_segments")),
+                "ResidentSegments": safe_int(row.get("resident_segments")),
+                "Temperature": safe_float(row.get("temperature")),
+                "LastAccessed": row.get("last_accessed"),
+                "ReportDate": report_date
+            })
+
+        log(f"      ✓ {len(results)} columns across {df_result['table_name'].nunique()} tables")
+
+    except Exception as e:
+        error_msg = str(e)
+        if "does not have permission" in error_msg or "Discover method" in error_msg:
+            log(f"      ⚠ Insufficient permissions to query DMVs")
+        elif "session" in error_msg.lower() and ("timeout" in error_msg.lower() or "expired" in error_msg.lower()):
+            log(f"      ⚠ Session timeout or connection lost")
+        else:
+            log(f"      ⚠ Error: {error_msg[:100]}")
+
+    return results
+
+# ==============================================================
+# GET WORKSPACES
+# ==============================================================
+
+workspaces_df = fabric.list_workspaces()
+
+if not SCAN_ALL_WORKSPACES:
+    workspaces_df = workspaces_df[workspaces_df["Name"].isin(WORKSPACE_NAMES)]
+    if workspaces_df.empty:
+        raise ValueError(f"No workspaces found matching: {WORKSPACE_NAMES}")
+    log(f"Filtering to workspaces: {WORKSPACE_NAMES}")
+
+log(f"Workspace count: {len(workspaces_df)}")
+log("")
+
+# ==============================================================
+# EXTRACT COLUMN STATS FROM ALL DATASETS
+# ==============================================================
+
+for ws_row in workspaces_df.itertuples(index=False):
+    ws_name = ws_row.Name
+    log(f"\nProcessing workspace: {ws_name} | Elapsed: {elapsed_min():.2f} min")
+
+    try:
+        datasets_df = fabric.list_datasets(workspace=ws_name)
+        if datasets_df is None or datasets_df.empty:
+            log("  No datasets found.")
+            continue
+
+        log(f"  Datasets found: {len(datasets_df)}")
+
+        for idx, row in datasets_df.iterrows():
+            # Handle different possible column names
+            model_name = row.get('Dataset Name') or row.get('Name') or row.get('Display Name', '')
+            model_id = row.get('Dataset ID') or row.get('Id') or row.get('ID', '')
+
+            log(f"    [{idx+1}/{len(datasets_df)}] Extracting column stats: {model_name}")
+
+            column_stats = extract_column_stats(ws_name, model_name, str(model_id), REPORT_DATE)
+            all_column_stats.extend(column_stats)
+
+    except Exception as e:
+        log(f"  ERROR processing workspace: {e}")
+
+log(f"\n✓ Total column stats collected: {len(all_column_stats) - 1}")  # -1 for template row
+
+# ==============================================================
+# WRITE TABLE
+# ==============================================================
+
+def write_table(data, name):
+    """
+    Write data to a Delta table. Schema is inferred from the first row (template).
+    Creates empty table with schema if only template row exists.
+    """
+    full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+
+    # Check if we only have the template row
+    if len(data) == 1:
+        log(f"⚠ No data for {name}, creating empty table with schema")
+        df = spark.createDataFrame(pd.DataFrame(data))
+        empty_df = df.filter("1=0")
+        empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
+        log(f"✓ Created empty table: {full_name}\n")
+        return
+
+    # Skip the template row (first row) and create DataFrame with actual data
+    pandas_df = pd.DataFrame(data)
+    actual_df = spark.createDataFrame(pandas_df.iloc[1:])
+    count = actual_df.count()
+
+    log(f"Writing {count} rows → {full_name}")
+
+    actual_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full_name)
+
+    log(f"✓ Wrote table: {full_name}\n")
+
+write_table(all_column_stats, "ModelColumnStats")
+
+# ==============================================================
+# END
+# ==============================================================
+
+heartbeat_running = False
+
+log("\n" + "="*80)
+log("MODEL COLUMN STATS EXTRACTION COMPLETE")
+log(f"Finished at: {datetime.now()}")
+log(f"Total runtime: {elapsed_min():.2f} minutes")
+log("="*80)
+
+
+# In[6]:
+
+
+# ================================
 # SQL ENDPOINT METADATA REFRESH
 # ================================
 # After writing tables to the lakehouse, refresh the SQL endpoint metadata
