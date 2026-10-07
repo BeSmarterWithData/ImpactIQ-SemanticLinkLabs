@@ -33,6 +33,12 @@ EXTRACT_MODEL_DEPENDENCIES = True
 
 EXTRACT_REPORT_METADATA = True
 
+# EXTRACT_FABRIC_APP_QUERIES: Inspect deployed Fabric AppBackend JavaScript for
+# static DAX query literals and semantic model mappings. This uses preview
+# private endpoints and is currently supported only in the public cloud.
+EXTRACT_FABRIC_APP_QUERIES = True
+MAX_FABRIC_APP_ASSETS = 64
+
 # In[0]:
 
 # ================================
@@ -73,6 +79,9 @@ import re
 if not isinstance(MAX_PARALLEL_WORKERS, int) or MAX_PARALLEL_WORKERS < 1 or MAX_PARALLEL_WORKERS > 20:
     raise ValueError("MAX_PARALLEL_WORKERS must be an integer between 1 and 20.")
 
+if not isinstance(MAX_FABRIC_APP_ASSETS, int) or MAX_FABRIC_APP_ASSETS < 1 or MAX_FABRIC_APP_ASSETS > 256:
+    raise ValueError("MAX_FABRIC_APP_ASSETS must be an integer between 1 and 256.")
+
 # -----------------------------------tree
 # CONFIGURATION VALIDATION
 # -----------------------------------
@@ -105,6 +114,7 @@ else:
 print(f"  Parallel Workers: {MAX_PARALLEL_WORKERS}")
 print(f"  Extract Model Dependencies: {EXTRACT_MODEL_DEPENDENCIES}")
 print(f"  Extract Report Metadata: {EXTRACT_REPORT_METADATA}")
+print(f"  Extract Fabric App Queries: {EXTRACT_FABRIC_APP_QUERIES}")
 
 
 # In[1]:
@@ -134,6 +144,9 @@ print(f"  Extract Report Metadata: {EXTRACT_REPORT_METADATA}")
 # 12. ReportPages - report pages with renamed columns
 # 13. Apps - Power BI apps
 # 14. AppReports - reports within apps
+# 15. FabricApps - Fabric AppBackend query-capture status
+# 16. FabricAppModels - semantic models configured for Fabric apps
+# 17. FabricAppQueries - static DAX candidates found in Fabric app assets
 #
 # All column names are renamed to match the PowerShell script output.
 #
@@ -150,8 +163,16 @@ import time
 import re
 import pandas as pd
 import json
+import base64
+import hashlib
+import html
+import secrets
+import uuid
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from html.parser import HTMLParser
+from urllib.parse import quote, urljoin, urlparse
+import requests
 import sempy.fabric as fabric
 from sempy.fabric import FabricRestClient
 
@@ -221,6 +242,9 @@ ALL_TABLE_SCHEMAS = {
     "ReportPages": {"WorkspaceId": "", "WorkspaceName": "", "ReportId": "", "ReportName": "", "PageName": "", "PageDisplayName": "", "PageOrder": 0},
     "Apps": {"AppId": "", "AppName": "", "AppLastUpdate": "", "AppDescription": "", "AppPublishedBy": "", "AppWorkspaceId": "", "WorkspaceName": ""},
     "AppReports": {"AppId": "", "AppName": "", "AppReportId": "", "AppReportType": "", "ReportName": "", "AppReportWebUrl": "", "AppReportEmbedUrl": "", "AppReportIsOwnedByMe": "", "AppReportDatasetId": "", "ReportId": "", "WorkspaceName": ""},
+    "FabricApps": {"WorkspaceId": "", "WorkspaceName": "", "AppId": "", "AppName": "", "CaptureStatus": "", "CaptureError": "", "AssetsInspected": 0, "FailedAssets": 0},
+    "FabricAppModels": {"AppWorkspaceId": "", "AppWorkspaceName": "", "AppId": "", "AppName": "", "ConnectionAlias": "", "ModelWorkspaceId": "", "ModelWorkspaceName": "", "ModelId": "", "ModelName": "", "Evidence": ""},
+    "FabricAppQueries": {"WorkspaceId": "", "WorkspaceName": "", "AppId": "", "AppName": "", "QuerySymbol": "", "Evidence": "", "QueryText": "", "SourceUrl": "", "ConnectionAlias": "", "ModelId": "", "ModelName": "", "ModelWorkspaceId": "", "ModelWorkspaceName": "", "ModelMappingEvidence": ""},
     # Cell 2 tables
     "ModelDetail": {"Type": "", "Table": "", "Name": "", "FormatString": "", "DisplayFolder": "", "Description": "", "IsHidden": "", "TableStorageMode": "", "Expression": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": "", "RelationshipFromTable": "", "RelationshipFromColumn": "", "RelationshipToTable": "", "RelationshipToColumn": "", "RelationshipStatus": "", "RelationshipFromCardinality": "", "RelationshipToCardinality": "", "RelationshipCrossFilteringBehavior": ""},
     "ModelDependencies": {"ObjectName": "", "ObjectType": "", "DependsOn": "", "DependsOnType": "", "ModelAsOfDate": "", "ModelName": "", "ModelID": "", "WorkspaceName": ""},
@@ -271,6 +295,9 @@ reports_info = []
 report_pages_info = []
 apps_info = []
 reports_in_app_info = []
+fabric_apps_info = []
+fabric_app_models_info = []
+fabric_app_queries_info = []
 
 # Lookup tables
 dataset_name_lookup = {}
@@ -293,6 +320,1368 @@ def serialize_json(obj):
     if obj:
         return json.dumps(obj)
     return ""
+
+class _FabricAppHtmlParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.script_sources = []
+        self.inline_script_count = 0
+        self.has_base = False
+        self._inside_script = False
+        self._script_has_source = False
+        self._inline_parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "base":
+            self.has_base = True
+        if tag != "script":
+            return
+        self._inside_script = True
+        self._script_has_source = False
+        self._inline_parts = []
+        for name, value in attrs:
+            if name.lower() == "src" and value:
+                self.script_sources.append(html.unescape(value))
+                self._script_has_source = True
+
+    def handle_data(self, data):
+        if self._inside_script and not self._script_has_source:
+            self._inline_parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() != "script" or not self._inside_script:
+            return
+        if not self._script_has_source and "".join(self._inline_parts).strip():
+            self.inline_script_count += 1
+        self._inside_script = False
+
+
+FABRIC_APP_GUID_PATTERN = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _decode_javascript_string(value):
+    result = []
+    index = 0
+    escapes = {
+        "n": "\n", "r": "\r", "t": "\t", "b": "\b",
+        "f": "\f", "v": "\v", "0": "\0"
+    }
+    while index < len(value):
+        if value[index] != "\\":
+            result.append(value[index])
+            index += 1
+            continue
+        index += 1
+        if index >= len(value):
+            raise ValueError("Incomplete JavaScript escape sequence.")
+        code = value[index]
+        index += 1
+        if code in "\r\n":
+            if code == "\r" and index < len(value) and value[index] == "\n":
+                index += 1
+            continue
+        if code in escapes:
+            if code == "0" and index < len(value) and value[index].isdigit():
+                raise ValueError("Legacy octal escapes are unsupported.")
+            result.append(escapes[code])
+        elif code == "x":
+            hex_value = value[index:index + 2]
+            if not re.fullmatch(r"[0-9a-fA-F]{2}", hex_value):
+                raise ValueError("Invalid JavaScript hexadecimal escape.")
+            result.append(chr(int(hex_value, 16)))
+            index += 2
+        elif code == "u":
+            if index < len(value) and value[index] == "{":
+                end = value.find("}", index + 1)
+                if end < 0:
+                    raise ValueError("Invalid JavaScript Unicode escape.")
+                hex_value = value[index + 1:end]
+                if not re.fullmatch(r"[0-9a-fA-F]{1,6}", hex_value):
+                    raise ValueError("Invalid JavaScript Unicode escape.")
+                result.append(chr(int(hex_value, 16)))
+                index = end + 1
+            else:
+                hex_value = value[index:index + 4]
+                if not re.fullmatch(r"[0-9a-fA-F]{4}", hex_value):
+                    raise ValueError("Invalid JavaScript Unicode escape.")
+                result.append(chr(int(hex_value, 16)))
+                index += 4
+        elif code.isdigit() and code != "0":
+            raise ValueError("Legacy JavaScript numeric escapes are unsupported.")
+        else:
+            result.append(code)
+    return "".join(result)
+
+
+def _extract_fabric_app_catalog(source):
+    """Port of Get-FabricAppDaxSource, including its static routing heuristics."""
+    # .NET offsets and bounded prefix searches count UTF-16 code units.
+    source = "".join(
+        character if ord(character) <= 0xFFFF else
+        chr(0xD800 + ((ord(character) - 0x10000) >> 10))
+        + chr(0xDC00 + ((ord(character) - 0x10000) & 0x3FF))
+        for character in source
+    )
+    queries = []
+    script_references = set()
+    tokens = []
+    lex = re.compile(
+        r'''(?P<space>\s+)|(?P<comment>//[^\r\n]*|/\*[\s\S]*?\*/)'''
+        r'''|(?P<string>"(?:\\[\s\S]|[^"\\\r\n])*"|'(?:\\[\s\S]|[^'\\\r\n])*')'''
+        r'''|(?P<word>[a-zA-Z_$][\w$]*)|(?P<number>\d+(?:\.\d+)?)'''
+        r'''|(?P<punct>=>|\+\+|--|&&|\|\||\?\?|[^\s])'''
+    )
+    regex_literal = re.compile(
+        r"/(?:\\[^\r\n]|\[(?:\\[^\r\n]|[^\]\\\r\n])*\]|[^/\\\[\r\n])+/[a-z]*"
+    )
+    template_chunk = re.compile(r"(?:[^`\\$]+|\\(?:\r\n|[\s\S])|\$(?!\{))+")
+    regex_prefix_tokens = {
+        "(", "[", "{", ",", ":", ";", "=", "=>", "!", "?", "&&", "||",
+        "??", "+", "-", "*", "/", "%", "&", "|", "^", "~", "<", ">",
+        "return", "throw", "case", "typeof", "void", "delete", "yield"
+    }
+
+    def add_literal(start, end, text, expressions):
+        if (
+            not expressions
+            and re.match(
+                r"^(?:\.{0,2}/|https://)\S+\.m?js(?:\?\S*)?$",
+                text,
+                re.IGNORECASE
+            )
+        ):
+            script_references.add(text)
+        if not re.match(r"^\s*(?:EVALUATE|DEFINE)\b", text, re.IGNORECASE):
+            return
+        prefix = source[max(0, start - 300):start]
+        owner_match = re.search(
+            r"(?:(?:function\s+(?P<function>[\w$]+)\([^{}]*\)\s*\{\s*return\s*)|"
+            r"(?:(?:const|let|var)\s+(?P<variable>[\w$]+)\s*=\s*))$",
+            prefix
+        )
+        symbol = ""
+        if owner_match:
+            symbol = owner_match.group("function") or owner_match.group("variable") or ""
+        if not symbol:
+            symbol = f"query_{len(queries) + 1}"
+        queries.append({
+            "symbol": symbol,
+            "evidence": "DynamicTemplate" if expressions else "StaticCandidate",
+            "text": text.strip(),
+            "expressions": expressions,
+            "start": start,
+            "end": end,
+            "line": 0,
+            "column": 0,
+            "literalSource": source[start:end],
+            "builderSource": None,
+            "enclosingExpression": None,
+        })
+
+    def scan_code(index, until_brace=False, depth=1):
+        if depth > 128:
+            raise ValueError("JavaScript nesting limit exceeded.")
+        brace_depth = 0
+        regex_allowed = True
+        while index < len(source):
+            start = index
+            match = lex.match(source, index)
+            if match is None:
+                raise ValueError("Could not scan JavaScript token.")
+            value = match.group()
+            index = match.end()
+            if match.lastgroup in ("space", "comment"):
+                continue
+            if value == "}" and until_brace and brace_depth == 0:
+                return index
+            if value == "{":
+                brace_depth += 1
+            if value == "}":
+                brace_depth -= 1
+            if match.lastgroup == "string":
+                text = _decode_javascript_string(value[1:-1])
+                tokens.append({"kind": "string", "value": text, "start": start, "end": index})
+                add_literal(start, index, text, [])
+                regex_allowed = False
+                continue
+            if value in ('"', "'"):
+                raise ValueError("Unterminated JavaScript string.")
+            if value == "`":
+                parts = []
+                expressions = []
+                closed = False
+                while index < len(source):
+                    chunk = template_chunk.match(source, index)
+                    if chunk:
+                        normalized = chunk.group().replace("\r\n", "\n").replace("\r", "\n")
+                        parts.append(_decode_javascript_string(normalized))
+                        index = chunk.end()
+                    elif source[index] == "`":
+                        index += 1
+                        closed = True
+                        break
+                    elif source.startswith("${", index):
+                        expression_start = index + 2
+                        index = scan_code(expression_start, True, depth + 1)
+                        expression = source[expression_start:index - 1]
+                        expressions.append(expression)
+                        parts.append("${" + expression + "}")
+                    else:
+                        raise ValueError("Unsupported JavaScript template.")
+                if not closed:
+                    raise ValueError("Unterminated JavaScript template.")
+                text = "".join(parts)
+                tokens.append({"kind": "template", "value": text, "start": start, "end": index})
+                add_literal(start, index, text, expressions)
+                regex_allowed = False
+                continue
+            if value == "/" and regex_allowed:
+                literal = regex_literal.match(source, start)
+                if literal is None:
+                    raise ValueError("Unterminated or unsupported JavaScript regular expression.")
+                index = literal.end()
+                tokens.append({"kind": "regex", "value": "", "start": start, "end": index})
+                regex_allowed = False
+                continue
+            tokens.append({
+                "kind": "word" if match.lastgroup == "word" else "punct",
+                "value": value,
+                "start": start,
+                "end": index
+            })
+            regex_allowed = value.lower() in regex_prefix_tokens
+        if until_brace:
+            raise ValueError("Unterminated JavaScript template expression.")
+        return index
+
+    scan_code(0)
+    # Retain lexer emission order, including interpolation tokens before their template.
+    top_level_tokens = tokens
+
+    def read_object(index, depth=0):
+        if depth > 8 or index >= len(tokens) or tokens[index]["value"] != "{":
+            raise ValueError("Unsupported model configuration.")
+        index += 1
+        result = {}
+        while index < len(tokens) and tokens[index]["value"] != "}":
+            key = tokens[index]
+            if key["kind"] not in ("word", "string") or key["value"] in result:
+                raise ValueError("Nonliteral or duplicate configuration property.")
+            index += 1
+            if index >= len(tokens) or tokens[index]["value"] != ":":
+                raise ValueError("Unsupported configuration property.")
+            index += 1
+            if index >= len(tokens):
+                raise ValueError("Incomplete configuration.")
+            if tokens[index]["kind"] == "string":
+                result[key["value"]] = tokens[index]["value"]
+                index += 1
+            elif tokens[index]["value"] == "{":
+                result[key["value"]], index = read_object(index, depth + 1)
+            else:
+                raise ValueError("Nonliteral model configuration.")
+            if index < len(tokens) and tokens[index]["value"] == ",":
+                index += 1
+            elif index >= len(tokens) or tokens[index]["value"] != "}":
+                raise ValueError("Unsupported configuration expression.")
+        if index >= len(tokens):
+            raise ValueError("Unterminated configuration object.")
+        return result, index + 1
+
+    mappings = []
+    for token_index in range(len(tokens) - 2):
+        if (
+            tokens[token_index]["value"].lower() != "semanticmodels"
+            or tokens[token_index + 1]["value"] != ":"
+            or tokens[token_index + 2]["value"] != "{"
+        ):
+            continue
+        try:
+            configuration, _ = read_object(token_index + 2)
+        except ValueError as error:
+            log(f"    Static Fabric app configuration skipped at offset {tokens[token_index]['start']}: {error}")
+            continue
+        for alias, model in configuration.items():
+            if (
+                isinstance(model, dict)
+                and isinstance(model.get("workspaceId"), str)
+                and isinstance(model.get("itemId"), str)
+                and re.fullmatch(FABRIC_APP_GUID_PATTERN, model["workspaceId"])
+                and re.fullmatch(FABRIC_APP_GUID_PATTERN, model["itemId"])
+            ):
+                mappings.append({
+                    "connectionAlias": alias,
+                    "modelWorkspaceId": model["workspaceId"],
+                    "modelId": model["itemId"],
+                    "evidence": "StaticConfiguration"
+                })
+
+    queries.sort(key=lambda query: query["start"])
+    line = 1
+    line_start = 0
+    scan_offset = 0
+    for query in queries:
+        while scan_offset < query["start"]:
+            newline = source.find("\n", scan_offset)
+            if newline < 0 or newline >= query["start"]:
+                break
+            line += 1
+            line_start = newline + 1
+            scan_offset = line_start
+        query["line"] = line
+        query["column"] = query["start"] - line_start + 1
+
+    alias_variables = {}
+    for token_index in range(len(top_level_tokens) - 2):
+        name, operator, value = top_level_tokens[token_index:token_index + 3]
+        if (
+            name["kind"] == "word"
+            and operator["value"] == "="
+            and value["kind"] == "string"
+            and re.fullmatch(r"[A-Za-z_$][\w$]*", value["value"])
+        ):
+            alias_variables[name["value"].casefold()] = value["value"]
+
+    def matching_token(open_index, open_value, close_value):
+        depth = 0
+        for candidate_index in range(open_index, len(top_level_tokens)):
+            value = top_level_tokens[candidate_index]["value"]
+            if value == open_value:
+                depth += 1
+            elif value == close_value:
+                depth -= 1
+                if depth == 0:
+                    return candidate_index
+        return -1
+
+    function_ranges = []
+    for token_index in range(len(top_level_tokens) - 4):
+        if (
+            top_level_tokens[token_index]["value"].lower() != "function"
+            or top_level_tokens[token_index + 1]["kind"] != "word"
+        ):
+            continue
+        open_parenthesis = token_index + 2
+        while (
+            open_parenthesis < len(top_level_tokens)
+            and top_level_tokens[open_parenthesis]["value"] != "("
+        ):
+            open_parenthesis += 1
+        if open_parenthesis >= len(top_level_tokens):
+            continue
+        close_parenthesis = matching_token(open_parenthesis, "(", ")")
+        if close_parenthesis < 0:
+            continue
+        open_brace = close_parenthesis + 1
+        while open_brace < len(top_level_tokens) and top_level_tokens[open_brace]["value"] != "{":
+            open_brace += 1
+        if open_brace >= len(top_level_tokens):
+            continue
+        close_brace = matching_token(open_brace, "{", "}")
+        if close_brace < 0:
+            continue
+        parameters = [
+            token["value"]
+            for token in top_level_tokens[open_parenthesis + 1:close_parenthesis]
+            if token["kind"] == "word"
+        ]
+        function_ranges.append({
+            "name": top_level_tokens[token_index + 1]["value"],
+            "parameters": parameters,
+            "start_index": token_index,
+            "open_index": open_brace,
+            "close_index": close_brace,
+            "start": top_level_tokens[token_index]["start"],
+            "end": top_level_tokens[close_brace]["end"]
+        })
+
+    for token_index in range(len(top_level_tokens) - 6):
+        if (
+            top_level_tokens[token_index]["kind"] != "word"
+            or top_level_tokens[token_index + 1]["value"] != "="
+            or top_level_tokens[token_index + 2]["value"] != "("
+        ):
+            continue
+        open_parenthesis = token_index + 2
+        close_parenthesis = matching_token(open_parenthesis, "(", ")")
+        if (
+            close_parenthesis < 0
+            or close_parenthesis + 2 >= len(top_level_tokens)
+            or top_level_tokens[close_parenthesis + 1]["value"] != "=>"
+        ):
+            continue
+        body_open = close_parenthesis + 2
+        opening_token = top_level_tokens[body_open]["value"]
+        closing_token = {"(": ")", "{": "}", "[": "]"}.get(opening_token)
+        if not closing_token:
+            continue
+        body_close = matching_token(body_open, opening_token, closing_token)
+        if body_close < 0:
+            continue
+        parameters = [
+            token["value"]
+            for token in top_level_tokens[open_parenthesis + 1:close_parenthesis]
+            if token["kind"] == "word"
+        ]
+        function_ranges.append({
+            "name": top_level_tokens[token_index]["value"],
+            "parameters": parameters,
+            "start_index": token_index,
+            "open_index": body_open,
+            "close_index": body_close,
+            "start": top_level_tokens[token_index]["start"],
+            "end": top_level_tokens[body_close]["end"]
+        })
+
+    def call_arguments(open_parenthesis):
+        arguments = []
+        argument_start = open_parenthesis + 1
+        round_depth = square_depth = curly_depth = 0
+        for token_index in range(argument_start, len(top_level_tokens)):
+            value = top_level_tokens[token_index]["value"]
+            if value == "(":
+                round_depth += 1
+            elif value == ")":
+                if round_depth == 0 and square_depth == 0 and curly_depth == 0:
+                    arguments.append((argument_start, token_index))
+                    return arguments
+                round_depth -= 1
+            elif value == "[":
+                square_depth += 1
+            elif value == "]":
+                square_depth -= 1
+            elif value == "{":
+                curly_depth += 1
+            elif value == "}":
+                curly_depth -= 1
+            elif (
+                value == ","
+                and round_depth == 0
+                and square_depth == 0
+                and curly_depth == 0
+            ):
+                arguments.append((argument_start, token_index))
+                argument_start = token_index + 1
+        return arguments
+
+    def resolve_alias(token):
+        if (
+            token["kind"] == "string"
+            and re.fullmatch(r"[A-Za-z_$][\w$]*", token["value"])
+        ):
+            return token["value"]
+        if token["kind"] == "word":
+            return alias_variables.get(token["value"].casefold(), "")
+        return ""
+
+    def function_at(position):
+        matches = [
+            function for function in function_ranges
+            if function["start"] <= position <= function["end"]
+        ]
+        if not matches:
+            return None
+        return min(
+            matches,
+            key=lambda function: function["end"] - function["start"]
+        )
+
+    dependencies_by_function = {}
+
+    def function_dependencies(function):
+        if function is None:
+            return {}
+        key = function["start"]
+        if key in dependencies_by_function:
+            return dependencies_by_function[key]
+        dependencies = {}
+        index = function["open_index"] + 1
+        while index < function["close_index"] - 2:
+            if top_level_tokens[index]["value"].lower() not in ("const", "let", "var"):
+                index += 1
+                continue
+            cursor = index + 1
+            while cursor < function["close_index"] - 1:
+                if (
+                    top_level_tokens[cursor]["kind"] != "word"
+                    or top_level_tokens[cursor + 1]["value"] != "="
+                ):
+                    break
+                name = top_level_tokens[cursor]["value"]
+                expression_start = cursor + 2
+                expression_end = expression_start
+                round_depth = square_depth = curly_depth = 0
+                while expression_end < function["close_index"]:
+                    value = top_level_tokens[expression_end]["value"]
+                    if value == "(":
+                        round_depth += 1
+                    elif value == ")":
+                        round_depth -= 1
+                    elif value == "[":
+                        square_depth += 1
+                    elif value == "]":
+                        square_depth -= 1
+                    elif value == "{":
+                        curly_depth += 1
+                    elif value == "}":
+                        curly_depth -= 1
+                    if (
+                        round_depth == 0
+                        and square_depth == 0
+                        and curly_depth == 0
+                        and value in (",", ";")
+                    ):
+                        break
+                    expression_end += 1
+                dependencies[name.casefold()] = {
+                    token["value"]
+                    for token in top_level_tokens[expression_start:expression_end]
+                    if token["kind"] == "word"
+                }
+                if (
+                    expression_end >= function["close_index"]
+                    or top_level_tokens[expression_end]["value"] == ";"
+                ):
+                    index = expression_end
+                    break
+                cursor = expression_end + 1
+            index += 1
+        dependencies_by_function[key] = dependencies
+        return dependencies
+
+    def expression_end(start, limit):
+        end = start
+        round_depth = square_depth = curly_depth = 0
+        while end < limit:
+            value = top_level_tokens[end]["value"]
+            if value == "(":
+                round_depth += 1
+            elif value == ")":
+                if round_depth == 0 and square_depth == 0 and curly_depth == 0:
+                    break
+                round_depth -= 1
+            elif value == "[":
+                square_depth += 1
+            elif value == "]":
+                square_depth -= 1
+            elif value == "{":
+                curly_depth += 1
+            elif value == "}":
+                if round_depth == 0 and square_depth == 0 and curly_depth == 0:
+                    break
+                curly_depth -= 1
+            if (
+                round_depth == 0
+                and square_depth == 0
+                and curly_depth == 0
+                and value == ","
+            ):
+                break
+            end += 1
+        return end
+
+    query_owners = {}
+    owner_by_start = {}
+    query_aliases = {}
+    for query in queries:
+        owner_function = function_at(query["start"])
+        owner = owner_function["name"] if owner_function else query["symbol"]
+        if owner_function is None:
+            for index in range(2, len(tokens)):
+                if tokens[index]["start"] != query["start"] or tokens[index]["kind"] not in ("string", "template"):
+                    continue
+                if tokens[index - 1]["value"] == "=" and tokens[index - 2]["kind"] == "word":
+                    owner = tokens[index - 2]["value"]
+                break
+            if owner.lower().startswith("query_"):
+                prefix = source[max(0, query["start"] - 500):query["start"]]
+                declaration = re.search(r"(?:(?:const|let|var)\s+|,)\s*(?P<name>[a-zA-Z_$][\w$]*)\s*=\s*$", prefix)
+                if declaration:
+                    owner = declaration["name"]
+            if owner.lower().startswith("query_"):
+                prefix = source[max(0, query["start"] - 20000):query["start"]]
+                declarations = list(re.finditer(r"function\s+(?P<name>[a-zA-Z_$][\w$]*)\s*\(", prefix))
+                if declarations:
+                    owner = declarations[-1]["name"]
+        query_owners.setdefault(owner.casefold(), []).append(query)
+        owner_by_start[query["start"]] = owner
+        query_aliases[query["start"]] = set()
+
+    def add_expression_route(alias, start, end, function):
+        if not alias or start >= end:
+            return
+        pending = [
+            token["value"]
+            for token in top_level_tokens[start:end]
+            if token["kind"] == "word"
+        ]
+        for token in top_level_tokens[start:end]:
+            for query in queries:
+                if token["start"] <= query["start"] and query["end"] <= token["end"]:
+                    query_aliases[query["start"]].add(alias)
+        dependencies = function_dependencies(function)
+        seen = set()
+        while pending:
+            symbol = pending.pop()
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            for query in query_owners.get(symbol.casefold(), ()):
+                query_aliases[query["start"]].add(alias)
+            pending.extend(dependencies.get(symbol.casefold(), ()))
+
+    def parameter_index(function, name):
+        parameters = function["parameters"]
+        return parameters.index(name) if name in parameters else -1
+
+    wrapper_parameter_routes = {}
+    parameterized_model_routes = {}
+    for function in function_ranges:
+        limit = function["close_index"]
+        for index in range(function["open_index"] + 1, limit - 5):
+            alias = ""
+            alias_parameter_index = -1
+            query_start = -1
+            route_property = tokens[index]["value"].lower()
+            if route_property in ("connection", "model") and tokens[index + 1]["value"] == ":":
+                alias_token = tokens[index + 2]
+                alias = resolve_alias(alias_token)
+                if not alias and route_property == "model" and alias_token["kind"] == "word":
+                    alias_parameter_index = parameter_index(function, alias_token["value"])
+                query_property = "dax" if route_property == "model" else "query"
+                for property_index in range(index + 3, min(limit, index + 40)):
+                    if tokens[property_index]["value"].lower() == query_property and tokens[property_index + 1]["value"] == ":":
+                        query_start = property_index + 2
+                        break
+            elif route_property == "semanticmodel" and tokens[index + 1]["value"] == "(":
+                alias = resolve_alias(tokens[index + 2])
+                if (
+                    alias and tokens[index + 3]["value"] == ")"
+                    and tokens[index + 4]["value"] == "."
+                    and tokens[index + 5]["value"].lower() == "query"
+                    and tokens[index + 6]["value"] == "("
+                ):
+                    query_start = index + 7
+            if (not alias and alias_parameter_index < 0) or query_start < 0:
+                continue
+            query_end = expression_end(query_start, limit)
+            query_parameter_index = -1
+            if query_end == query_start + 1 and tokens[query_start]["kind"] == "word":
+                query_parameter_index = parameter_index(function, tokens[query_start]["value"])
+            if alias:
+                add_expression_route(alias, query_start, query_end, function)
+                if query_parameter_index >= 0:
+                    wrapper_parameter_routes.setdefault(function["name"].casefold(), {})[query_parameter_index] = alias
+            else:
+                parameterized_model_routes.setdefault(function["name"].casefold(), []).append({
+                    "alias_parameter": alias_parameter_index,
+                    "query_start": query_start,
+                    "query_end": query_end,
+                    "query_parameter": query_parameter_index,
+                    "function": function,
+                })
+
+    for index in range(len(tokens) - 2):
+        name = tokens[index]["value"].casefold()
+        if (
+            tokens[index + 1]["value"] != "("
+            or (index > 0 and tokens[index - 1]["value"].lower() == "function")
+            or (name not in parameterized_model_routes and name not in wrapper_parameter_routes)
+        ):
+            continue
+        arguments = call_arguments(index + 1)
+        caller = function_at(tokens[index]["start"])
+        for route in parameterized_model_routes.get(name, ()):
+            if route["alias_parameter"] >= len(arguments):
+                continue
+            start, end = arguments[route["alias_parameter"]]
+            if end != start + 1:
+                continue
+            alias = resolve_alias(tokens[start])
+            if not alias:
+                continue
+            if 0 <= route["query_parameter"] < len(arguments):
+                start, end = arguments[route["query_parameter"]]
+                add_expression_route(alias, start, end, caller)
+            else:
+                add_expression_route(alias, route["query_start"], route["query_end"], route["function"])
+        for argument_index, alias in wrapper_parameter_routes.get(name, {}).items():
+            if argument_index < len(arguments):
+                start, end = arguments[argument_index]
+                add_expression_route(alias, start, end, caller)
+
+    def extend_connection_routes():
+        # Rayfin hooks may forward (query, connection = default) through several
+        # wrappers. Keep the two arguments paired at each call site.
+        functions = {function["start"]: function for function in function_ranges}
+        parents = {}
+        parameters = {}
+        summaries = {}
+        declarations = {}
+        builders = {}
+
+        def scope_at(position):
+            function = function_at(position)
+            return function["start"] if function else None
+
+        for key, function in functions.items():
+            containers = [
+                candidate for candidate in function_ranges
+                if candidate["start"] < key and function["end"] <= candidate["end"]
+            ]
+            parent = min(containers, key=lambda candidate: candidate["end"] - candidate["start"]) if containers else None
+            parents[key] = parent["start"] if parent else None
+            builders.setdefault((parents[key], function["name"]), []).append(key)
+            opening = function["start_index"] + 2
+            if tokens[opening]["value"] != "(":
+                continue
+            parsed_parameters = []
+            for start, end in call_arguments(opening):
+                if start == end:
+                    continue
+                if tokens[start]["kind"] != "word" or (end > start + 1 and tokens[start + 1]["value"] != "="):
+                    break
+                parsed_parameters.append((
+                    tokens[start]["value"],
+                    (start + 2, end) if end > start + 1 else None,
+                ))
+            else:
+                parameters[key] = parsed_parameters
+                summaries[key] = set()
+
+        def value_end(start):
+            stack = []
+            for index in range(start, len(tokens)):
+                token = tokens[index]
+                if token["kind"] != "punct":
+                    continue
+                value = token["value"]
+                if not stack and value in (",", ";", ")", "]", "}"):
+                    return index
+                if value in ("(", "[", "{"):
+                    stack.append(value)
+                elif value in (")", "]", "}"):
+                    if stack:
+                        stack.pop()
+            return len(tokens)
+
+        for index in range(1, len(tokens) - 2):
+            if (
+                tokens[index]["kind"] == "word"
+                and tokens[index + 1]["value"] == "="
+                and tokens[index - 1]["value"] in ("const", "let", "var", ",")
+            ):
+                scope = scope_at(tokens[index]["start"])
+                if scope is not None and index < functions[scope]["open_index"]:
+                    continue
+                declarations[(scope, tokens[index]["value"])] = (index + 2, value_end(index + 2))
+
+        def lookup(name, scope, table):
+            while True:
+                if (scope, name) in table:
+                    return scope, table[(scope, name)]
+                if scope is None:
+                    return None, None
+                scope = parents[scope]
+
+        queries_by_builder = {}
+        for query in queries:
+            owner = scope_at(query["start"])
+            if owner is not None:
+                queries_by_builder.setdefault(owner, set()).add(("query", query["start"]))
+
+        def evaluate(start, end, scope, kind, seen=frozenset()):
+            if start >= end:
+                return set()
+            expression = tokens[start:end]
+            if kind == "alias":
+                if len(expression) != 1:
+                    return set()
+                token = expression[0]
+                if token["kind"] == "string":
+                    return {("alias", token["value"])} if re.fullmatch(r"[A-Za-z_$][\w$]*", token["value"]) else set()
+            result = set()
+            if kind == "query":
+                for token in expression:
+                    if token["kind"] in ("string", "template"):
+                        result.update(
+                            ("query", query["start"]) for query in queries
+                            if token["start"] <= query["start"] and query["end"] <= token["end"]
+                        )
+            for index in range(start, end):
+                token = tokens[index]
+                if token["kind"] != "word" or (index > start and tokens[index - 1]["value"] in (".", "?.")):
+                    continue
+                name = token["value"]
+                param_names = [param[0] for param in parameters.get(scope, ())]
+                if name in param_names:
+                    result.add(("parameter", param_names.index(name)))
+                    continue
+                declaration_scope, declaration = lookup(name, scope, declarations)
+                if declaration is not None:
+                    key = (declaration_scope, name, kind)
+                    if key not in seen:
+                        result.update(evaluate(*declaration, declaration_scope, kind, seen | {key}))
+                    continue
+                if kind == "query" and index + 1 < end and tokens[index + 1]["value"] == "(":
+                    _, candidates = lookup(name, scope, builders)
+                    if candidates and len(candidates) == 1:
+                        result.update(queries_by_builder.get(candidates[0], ()))
+            return result
+
+        # Only infer this extension from a connection/query object with a
+        # parameterized connection, not arbitrary two-argument function calls.
+        for index in range(len(tokens) - 4):
+            if tokens[index]["value"] != "{" or tokens[index]["kind"] != "punct":
+                continue
+            scope = scope_at(tokens[index]["start"])
+            if scope not in parameters:
+                continue
+            end = matching_token(index, "{", "}")
+            if end < 0:
+                continue
+            properties = {}
+            cursor = index + 1
+            while cursor < end:
+                if tokens[cursor]["kind"] not in ("word", "string"):
+                    break
+                name = tokens[cursor]["value"]
+                if cursor + 1 < end and tokens[cursor + 1]["value"] == ":":
+                    start = cursor + 2
+                    stop = min(value_end(start), end)
+                else:
+                    start, stop = cursor, cursor + 1
+                if name in properties:
+                    break
+                properties[name] = (start, stop)
+                cursor = stop
+                if cursor < end and tokens[cursor]["value"] == ",":
+                    cursor += 1
+                elif cursor != end:
+                    break
+            else:
+                if "connection" not in properties or "query" not in properties:
+                    continue
+                aliases = evaluate(*properties["connection"], scope, "alias")
+                query_values = evaluate(*properties["query"], scope, "query")
+                for alias in aliases:
+                    if alias[0] == "parameter":
+                        summaries[scope].update((alias, query_value) for query_value in query_values)
+
+        calls = []
+        wrapper_names = {functions[key]["name"] for key in parameters}
+        for index in range(len(tokens) - 2):
+            token = tokens[index]
+            if (
+                token["kind"] != "word" or token["value"] not in wrapper_names
+                or tokens[index + 1]["value"] != "("
+                or (index > 0 and tokens[index - 1]["value"] in ("function", ".", "?."))
+            ):
+                continue
+            scope = scope_at(token["start"])
+            _, candidates = lookup(token["value"], scope, builders)
+            if candidates and len(candidates) == 1 and candidates[0] in summaries:
+                calls.append((scope, candidates[0], call_arguments(index + 1)))
+
+        def bind(value, arguments, caller, callee, kind):
+            if value[0] != "parameter":
+                return {value}
+            index = value[1]
+            if index < len(arguments):
+                start, end = arguments[index]
+                if start < end and not (end == start + 1 and tokens[start]["value"] == "undefined"):
+                    return evaluate(start, end, caller, kind)
+            default = parameters[callee][index][1]
+            return evaluate(*default, parents[callee], kind) if default else set()
+
+        changed = True
+        while changed:
+            changed = False
+            for caller, callee, arguments in calls:
+                for alias, query_value in tuple(summaries[callee]):
+                    for actual_alias in bind(alias, arguments, caller, callee, "alias"):
+                        for actual_query in bind(query_value, arguments, caller, callee, "query"):
+                            if actual_alias[0] == "alias" and actual_query[0] == "query":
+                                query_aliases[actual_query[1]].add(actual_alias[1])
+                            elif caller in summaries:
+                                route = (actual_alias, actual_query)
+                                if route not in summaries[caller]:
+                                    summaries[caller].add(route)
+                                    changed = True
+
+    extend_connection_routes()
+
+    for query in queries:
+        aliases = query_aliases[query["start"]]
+        prefix = source[max(0, query["start"] - 500):query["start"]]
+        model_matches = list(re.finditer(
+            r'''model\s*:\s*["'](?P<route>[a-zA-Z_$][\w$]*)["']\s*,\s*dax\s*:\s*$''', prefix
+        ))
+        if model_matches:
+            aliases.add(model_matches[-1]["route"])
+        wrapper_matches = list(re.finditer(
+            r'''(?<![\w$])[a-zA-Z_$][\w$]*\s*\(\s*["'](?P<route>[a-zA-Z_$][\w$]*)["']\s*,''', prefix
+        ))
+        if wrapper_matches:
+            aliases.add(wrapper_matches[-1]["route"])
+        owner = owner_by_start[query["start"]]
+        if owner and not owner.lower().startswith("query_"):
+            owner_pattern = r"(?<![\w$])" + re.escape(owner) + r"(?![\w$])"
+            for match in re.finditer(
+                owner_pattern + r'''\s*\(\s*["'](?P<route>[a-zA-Z_$][\w$]*)["']\s*,''', source
+            ):
+                aliases.add(match["route"])
+            for call in re.finditer(owner_pattern + r"\s*\(", source):
+                prefix = source[max(0, call.start() - 600):call.start()]
+                assignments = list(re.finditer(r"(?P<symbol>[a-zA-Z_$][\w$]*)\s*=", prefix))
+                if not assignments:
+                    continue
+                symbol = re.escape(assignments[-1]["symbol"])
+                for match in re.finditer(
+                    r'''connection\s*:\s*["'](?P<route>[a-zA-Z_$][\w$]*)["']\s*,\s*query\s*:\s*'''
+                    + symbol + r"(?![\w$])", source
+                ):
+                    aliases.add(match["route"])
+        query["connectionAliases"] = sorted(aliases, key=str.casefold)
+
+    def unicode_text(value):
+        return value.encode("utf-16-le", errors="surrogatepass").decode(
+            "utf-16-le", errors="surrogatepass"
+        )
+
+    for query in queries:
+        for field in ("text", "literalSource"):
+            query[field] = unicode_text(query[field])
+        query["expressions"] = [unicode_text(value) for value in query["expressions"]]
+    return {
+        "queries": queries,
+        "scriptReferences": sorted(unicode_text(value) for value in script_references),
+        "modelMappings": mappings
+    }
+
+
+def _fabric_app_token(resource):
+    from notebookutils import mssparkutils
+    token = mssparkutils.credentials.getToken(resource)
+    if not token:
+        raise RuntimeError(f"Could not acquire an access token for {resource}.")
+    return token
+
+
+def _fabric_app_request(session, method, url, headers=None, json_body=None):
+    response = session.request(
+        method,
+        url,
+        headers=headers or {},
+        json=json_body,
+        allow_redirects=False,
+        timeout=60
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Request failed with HTTP {response.status_code}: {url}")
+    if len(response.content) > 20 * 1024 * 1024:
+        raise RuntimeError(f"Response exceeded the 20 MB asset limit: {url}")
+    return response
+
+
+def _fabric_rest_json(client, path):
+    response = client.get(path)
+    if response.status_code != 200:
+        raise RuntimeError(f"Fabric request failed with HTTP {response.status_code}: {path}")
+    if len(response.content) > 20 * 1024 * 1024:
+        raise RuntimeError(f"Fabric response exceeded the 20 MB limit: {path}")
+    return response.json()
+
+
+def _validated_fabric_app_uri(value, host_suffix):
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise ValueError("Fabric App endpoint must be a standard HTTPS URL.")
+    host = (parsed.hostname or "").lower()
+    if not host.endswith(host_suffix.lower()) or host == host_suffix.lstrip(".").lower():
+        raise ValueError(f"Unexpected Fabric App endpoint host: {host}")
+    return parsed
+
+
+def _map_fabric_app_queries(queries, models):
+    """Canonicalize uniquely matched aliases before candidate filtering and model mapping."""
+    configured_aliases = {model["ConnectionAlias"] for model in models}
+    if configured_aliases:
+        aliases_by_case = {}
+        for alias in configured_aliases:
+            aliases_by_case.setdefault(alias.casefold(), []).append(alias)
+        groups = {}
+        for query in queries:
+            alias = query["ConnectionAlias"]
+            if alias and alias not in configured_aliases:
+                matches = aliases_by_case.get(alias.casefold(), [])
+                if len(matches) == 1:
+                    query["ConnectionAlias"] = matches[0]
+            key = "\0".join(query[field] for field in ("SourceUrl", "QuerySymbol", "QueryText"))
+            groups.setdefault(key.casefold(), []).append(query)
+        queries = []
+        for candidates in groups.values():
+            valid = [
+                query for query in candidates
+                if query["ConnectionAlias"] and query["ConnectionAlias"] in configured_aliases
+            ]
+            if valid:
+                unique_candidates = {}
+                for query in valid:
+                    unique_candidates.setdefault(query["ConnectionAlias"], query)
+                queries.extend(unique_candidates.values())
+            else:
+                candidates[0]["ConnectionAlias"] = ""
+                queries.append(candidates[0])
+
+    unique_models = {}
+    for model in models:
+        fields = ("ConnectionAlias", "ModelId", "ModelWorkspaceId")
+        if all(model[field] for field in fields):
+            key = tuple(model[field].casefold() for field in fields)
+            unique_models.setdefault(key, model)
+    configured_models = list(unique_models.values())
+    for query in queries:
+        alias = query["ConnectionAlias"]
+        matches = (
+            [model for model in configured_models if model["ConnectionAlias"] == alias]
+            if alias else configured_models
+        )
+        mapping = matches[0] if len(matches) == 1 else None
+        query["ModelMappingEvidence"] = (
+            ("ConnectionAlias" if alias else "SingleConfiguredModel") if mapping else ""
+        )
+        if mapping:
+            query["ConnectionAlias"] = mapping["ConnectionAlias"]
+        for field in ("ModelId", "ModelName", "ModelWorkspaceId", "ModelWorkspaceName"):
+            query[field] = mapping[field] if mapping else ""
+    return queries
+
+
+def _capture_fabric_app_queries(app_item, dataset_lookup, workspace_lookup):
+    workspace_id = app_item["WorkspaceId"]
+    workspace_name = app_item["WorkspaceName"]
+    app_id = app_item["FabricItemID"]
+    app_name = app_item["FabricItemName"]
+    capture = {
+        "WorkspaceId": workspace_id,
+        "WorkspaceName": workspace_name,
+        "AppId": app_id,
+        "AppName": app_name,
+        "CaptureStatus": "Failed",
+        "CaptureError": "",
+        "AssetsInspected": 0,
+        "FailedAssets": 0
+    }
+    queries = []
+    mappings = []
+    stage = "Discovery"
+    session = requests.Session()
+    try:
+        fabric_client = FabricRestClient()
+        item_endpoint = f"v1/workspaces/{workspace_id}/appBackends/{app_id}"
+        deployment = _fabric_rest_json(
+            fabric_client, f"{item_endpoint}/__private/deploy/status"
+        )
+        extended = _fabric_rest_json(
+            fabric_client, f"{item_endpoint}/__private/extended-properties"
+        )
+        hosting = _validated_fabric_app_uri(deployment["hostingUrl"], ".fabricapps.net")
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.webapp(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.fabricapps\.net", hosting.hostname or ""):
+            raise ValueError("Unexpected Fabric App hosting URL.")
+        workload = _validated_fabric_app_uri(
+            extended["extendedProperties"]["BaaSEndpoint"],
+            ".pbidedicated.windows.net"
+        )
+        if hosting.path not in ("", "/"):
+            raise ValueError(
+                f"Fabric App hosting URL has an unexpected path: {hosting.path}"
+            )
+        expected_workload_path = (
+            f"/workspaces/{workspace_id}/appbackends/{app_id}".lower()
+        )
+        if not workload.path.rstrip("/").lower().endswith(expected_workload_path):
+            raise ValueError(
+                "Fabric App workload URL does not match the requested workspace and app."
+            )
+        origin = f"{hosting.scheme}://{hosting.netloc}"
+
+        stage = "Workload authentication"
+        power_bi_token = _fabric_app_token("https://analysis.windows.net/powerbi/api")
+        power_bi_headers = {"Authorization": f"Bearer {power_bi_token}"}
+        cluster_info = _fabric_app_request(
+            session, "GET", "https://api.powerbi.com/metadata/cluster", power_bi_headers
+        ).json()
+        cluster = _validated_fabric_app_uri(cluster_info["backendUrl"], ".analysis.windows.net")
+        cluster_origin = f"{cluster.scheme}://{cluster.netloc}"
+        power_bi_headers["X-PowerBI-ResourceKey"] = workspace_id
+        claims = {
+            "workspaceObjectId": workspace_id,
+            "workloadType": "BaaS",
+            "artifacts": [{"artifactType": "AppBackend", "artifactObjectId": app_id}]
+        }
+        mwc = _fabric_app_request(
+            session,
+            "POST",
+            f"{cluster_origin}/metadata/v201606/generatemwctokenv2",
+            power_bi_headers,
+            claims
+        ).json()
+        if not mwc.get("Token") or mwc.get("TargetUriHost", "").lower() != (workload.hostname or "").lower():
+            raise ValueError("Workload token target mismatch.")
+
+        workload_headers = {
+            "Authorization": f"MwcToken {mwc['Token']}",
+            "x-ms-workload-resource-moniker": app_id
+        }
+        runtime_warning = ""
+        try:
+            runtime_url = f"{extended['extendedProperties']['BaaSEndpoint'].rstrip('/')}/api/projectRuntimeSettings"
+            runtime_settings = _fabric_app_request(
+                session, "GET", runtime_url, workload_headers
+            ).json()
+            connectors = runtime_settings.get("serviceSettings", {}).get("connectors", {})
+            for alias, connector in connectors.items():
+                if connector.get("connector") != "fabric-semanticmodel":
+                    continue
+                config = connector.get("config", {})
+                model_id = config.get("itemId", "")
+                model_workspace_id = config.get("workspaceId", "")
+                if (
+                    re.fullmatch(FABRIC_APP_GUID_PATTERN, model_id, re.IGNORECASE)
+                    and re.fullmatch(FABRIC_APP_GUID_PATTERN, model_workspace_id, re.IGNORECASE)
+                ):
+                    mappings.append({
+                        "connectionAlias": alias,
+                        "modelId": model_id,
+                        "modelWorkspaceId": model_workspace_id,
+                        "evidence": "BackendConnectorConfiguration"
+                    })
+        except Exception as error:
+            runtime_warning = f"Runtime connector settings were unavailable: {error}"
+
+        stage = "Hosting authentication"
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode("ascii")).digest()
+        ).decode().rstrip("=")
+        state = uuid.uuid4().hex
+        handoff = _fabric_app_request(
+            session,
+            "POST",
+            f"{extended['extendedProperties']['BaaSEndpoint'].rstrip('/')}/api/auth/v1/brokered/authorize",
+            workload_headers,
+            {
+                "returnOrigin": origin,
+                "codeChallenge": challenge,
+                "codeChallengeMethod": "S256",
+                "state": state
+            }
+        ).json()
+        if not handoff.get("handoffCode") or handoff.get("state") != state:
+            raise ValueError("Hosting handoff state mismatch.")
+        _fabric_app_request(
+            session,
+            "GET",
+            f"{origin}/?_hc={quote(handoff['handoffCode'], safe='')}",
+            {
+                "Accept": "application/json",
+                "x-rayfin-sh-code-verifier": verifier,
+                "x-ms-workload-resource-moniker": app_id
+            }
+        )
+
+        stage = "Asset discovery"
+        app_html = _fabric_app_request(
+            session, "GET", f"{origin}/", {"Accept": "text/html"}
+        ).text
+        if re.search(r"<title>\s*Sign in required\s*</title>", app_html, re.IGNORECASE):
+            raise RuntimeError("Hosting session did not serve the Fabric app.")
+        parser = _FabricAppHtmlParser()
+        parser.feed(app_html)
+        pending = [urljoin(f"{origin}/", source) for source in parser.script_sources]
+        seen = set()
+        failed_assets = parser.inline_script_count + int(parser.has_base or not parser.script_sources)
+        failure_details = []
+        if parser.inline_script_count:
+            failure_details.append(
+                f"{parser.inline_script_count} inline script(s) require manual review"
+            )
+        if parser.has_base:
+            failure_details.append("HTML base URL requires manual review")
+        if not parser.script_sources:
+            failure_details.append("no external script sources were discovered")
+        while pending and capture["AssetsInspected"] < MAX_FABRIC_APP_ASSETS:
+            asset_url = pending.pop(0)
+            if asset_url in seen:
+                continue
+            seen.add(asset_url)
+            asset = urlparse(asset_url)
+            if (
+                f"{asset.scheme}://{asset.netloc}" != origin
+                or asset.username
+                or asset.password
+                or asset.query
+                or asset.fragment
+            ):
+                failed_assets += 1
+                failure_details.append(f"rejected asset URL: {asset_url}")
+                continue
+            capture["AssetsInspected"] += 1
+            try:
+                response = _fabric_app_request(session, "GET", asset_url)
+                if "text/html" in response.headers.get("Content-Type", "").lower():
+                    raise RuntimeError("Expected JavaScript but received HTML.")
+                catalog = _extract_fabric_app_catalog(response.text)
+                if catalog["queries"]:
+                    candidate_aliases = sorted({
+                        alias
+                        for query in catalog["queries"]
+                        for alias in query["connectionAliases"]
+                        if alias
+                    })
+                    log(
+                        f"    Parsed {len(catalog['queries'])} DAX candidates from "
+                        f"{asset.path.rsplit('/', 1)[-1] or '/'}; "
+                        f"candidate aliases: {candidate_aliases or ['<none>']}"
+                    )
+                backend_aliases = {
+                    mapping["connectionAlias"]
+                    for mapping in mappings
+                    if mapping["evidence"] == "BackendConnectorConfiguration"
+                }
+                for mapping in catalog["modelMappings"]:
+                    if mapping["connectionAlias"] not in backend_aliases:
+                        mappings.append(mapping)
+                for query in catalog["queries"]:
+                    aliases = query["connectionAliases"] or [""]
+                    for alias in aliases:
+                        queries.append({
+                            "WorkspaceId": workspace_id,
+                            "WorkspaceName": workspace_name,
+                            "AppId": app_id,
+                            "AppName": app_name,
+                            "QuerySymbol": query["symbol"],
+                            "Evidence": query["evidence"],
+                            "QueryText": query["text"],
+                            "SourceUrl": asset_url,
+                            "ConnectionAlias": alias,
+                            "ModelId": "",
+                            "ModelName": "",
+                            "ModelWorkspaceId": "",
+                            "ModelWorkspaceName": "",
+                            "ModelMappingEvidence": ""
+                        })
+                pending.extend(urljoin(asset_url, reference) for reference in catalog["scriptReferences"])
+            except Exception as error:
+                failed_assets += 1
+                failure_details.append(f"{asset_url}: {error}")
+                log(f"    Warning: Fabric app asset skipped ({asset_url}): {error}")
+
+        capture["FailedAssets"] = failed_assets
+        warnings = []
+        if runtime_warning:
+            warnings.append(runtime_warning)
+        if failed_assets or pending:
+            detail = "; ".join(failure_details[:3])
+            if pending:
+                detail = f"{detail}; {len(pending)} asset(s) remained after the limit".strip("; ")
+            warnings.append(
+                "Some scripts were skipped or unavailable, or the asset limit was reached."
+                + (f" Details: {detail}" if detail else "")
+            )
+        if not queries:
+            warnings.append(
+                "No DAX literals were found; static inspection does not prove that the app has no queries."
+            )
+
+        unique_mappings = {}
+        for mapping in mappings:
+            if not all(mapping[field] for field in ("connectionAlias", "modelWorkspaceId", "modelId")):
+                continue
+            key = (
+                mapping["connectionAlias"],
+                mapping["modelWorkspaceId"],
+                mapping["modelId"],
+                mapping["evidence"],
+            )
+            unique_mappings.setdefault(key, mapping)
+        models = []
+        resolved_workspaces = dict(workspace_lookup)
+        resolved_datasets = dict(dataset_lookup)
+        for mapping in unique_mappings.values():
+            model_workspace_id = mapping["modelWorkspaceId"]
+            model_id = mapping["modelId"]
+            if model_workspace_id not in resolved_workspaces:
+                try:
+                    workspace_metadata = _fabric_rest_json(
+                        fabric_client, f"v1/workspaces/{model_workspace_id}"
+                    )
+                    if (
+                        workspace_metadata.get("id", "").lower() == model_workspace_id.lower()
+                        and workspace_metadata.get("displayName")
+                    ):
+                        resolved_workspaces[model_workspace_id] = workspace_metadata["displayName"]
+                except Exception as error:
+                    warnings.append(
+                        f"Could not resolve model workspace {model_workspace_id}: {error}"
+                    )
+            dataset_key = (model_workspace_id, model_id)
+            if dataset_key not in resolved_datasets:
+                try:
+                    model_metadata = _fabric_rest_json(
+                        fabric_client,
+                        f"v1/workspaces/{model_workspace_id}/items/{model_id}"
+                    )
+                    if (
+                        model_metadata.get("id", "").lower() == model_id.lower()
+                        and model_metadata.get("type") == "SemanticModel"
+                        and model_metadata.get("displayName")
+                    ):
+                        resolved_datasets[dataset_key] = model_metadata["displayName"]
+                except Exception as error:
+                    warnings.append(
+                        f"Could not resolve semantic model {model_id}: {error}"
+                    )
+            models.append({
+                "AppWorkspaceId": workspace_id,
+                "AppWorkspaceName": workspace_name,
+                "AppId": app_id,
+                "AppName": app_name,
+                "ConnectionAlias": mapping["connectionAlias"],
+                "ModelWorkspaceId": model_workspace_id,
+                "ModelWorkspaceName": resolved_workspaces.get(model_workspace_id, ""),
+                "ModelId": model_id,
+                "ModelName": resolved_datasets.get(dataset_key, ""),
+                "Evidence": mapping["evidence"]
+            })
+
+        configured_aliases = {model["ConnectionAlias"] for model in models}
+        log(
+            f"    Configured Fabric app aliases: "
+            f"{sorted(configured_aliases) or ['<none>']}"
+        )
+        queries = _map_fabric_app_queries(queries, models)
+        if not models:
+            warnings.append(
+                "No semantic-model targets were discovered in backend connector settings or app scripts; query model fields remain blank."
+            )
+
+        capture["CaptureStatus"] = "Partial" if warnings else "Succeeded"
+        capture["CaptureError"] = " ".join(warnings)
+        return capture, models, queries
+    except Exception as error:
+        capture["CaptureError"] = (
+            f"{stage} failed: {error}. Check sign-in, app permissions, "
+            "prerequisites, and preview API availability."
+        )
+        return capture, [], []
+    finally:
+        session.close()
 
 # ==============================================================  
 # PARALLEL API HELPERS FOR PERFORMANCE
@@ -823,6 +2212,73 @@ for ws_info in workspaces_info:
 log("✓ Dataflow lineage collection complete")
 
 # ==============================================================  
+# FABRIC APP QUERIES AND MODEL MAPPINGS
+# ==============================================================
+
+log("\n" + "="*80)
+log("Fetching Fabric App Queries and Model Mappings")
+log("="*80)
+
+fabric_app_items = [
+    item for item in fabric_items_info
+    if item["FabricItemType"] == "AppBackend"
+]
+
+if not EXTRACT_FABRIC_APP_QUERIES:
+    log("Fabric app query extraction is disabled")
+elif not fabric_app_items:
+    log("No Fabric AppBackend items found")
+else:
+    fabric_app_dataset_lookup = {
+        (dataset["WorkspaceId"], dataset["DatasetId"]): dataset["DatasetName"]
+        for dataset in datasets_info
+    }
+    fabric_app_workspace_lookup = {
+        workspace["WorkspaceId"]: workspace["WorkspaceName"]
+        for workspace in workspaces_info
+    }
+    log(
+        f"Extracting queries from {len(fabric_app_items)} Fabric apps "
+        f"(max {MAX_WORKERS} workers)..."
+    )
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(
+                _capture_fabric_app_queries,
+                app_item,
+                fabric_app_dataset_lookup,
+                fabric_app_workspace_lookup
+            ): app_item
+            for app_item in fabric_app_items
+        }
+        for future in as_completed(futures):
+            app_item = futures[future]
+            try:
+                capture, models, queries = future.result()
+            except Exception as e:
+                capture = {
+                    "WorkspaceId": app_item["WorkspaceId"],
+                    "WorkspaceName": app_item["WorkspaceName"],
+                    "AppId": app_item["FabricItemID"],
+                    "AppName": app_item["FabricItemName"],
+                    "CaptureStatus": "Failed",
+                    "CaptureError": f"Unexpected extraction failure: {e}",
+                    "AssetsInspected": 0,
+                    "FailedAssets": 0
+                }
+                models = []
+                queries = []
+            fabric_apps_info.append(capture)
+            fabric_app_models_info.extend(models)
+            fabric_app_queries_info.extend(queries)
+            log(
+                f"  {capture['CaptureStatus']}: {capture['WorkspaceName']} ~ "
+                f"{capture['AppName']} ({len(queries)} queries, {len(models)} models)"
+            )
+            if capture["CaptureError"]:
+                log(f"    {capture['CaptureError']}")
+
+# ==============================================================
 # WRITE TO LAKEHOUSE
 # ==============================================================
 
@@ -862,6 +2318,9 @@ write_table(reports_info, "Reports")
 write_table(report_pages_info, "ReportPages")
 write_table(apps_info, "Apps")
 write_table(reports_in_app_info, "AppReports")
+write_table(fabric_apps_info, "FabricApps")
+write_table(fabric_app_models_info, "FabricAppModels")
+write_table(fabric_app_queries_info, "FabricAppQueries")
 
 # ==============================================================  
 # END
