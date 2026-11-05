@@ -118,6 +118,7 @@ print(f"  Extract Fabric App Queries: {EXTRACT_FABRIC_APP_QUERIES}")
 
 
 # In[1]:
+_iiq_registry = {}
 
 
 # ================================
@@ -778,17 +779,38 @@ def _extract_fabric_app_catalog(source):
             return alias_variables.get(token["value"].casefold(), "")
         return ""
 
+    _fa_cache = {}
+
+    def _fa_build():
+        import heapq
+        from bisect import bisect_right
+        ranges = list(function_ranges)
+        boundaries = sorted({function["start"] for function in ranges} | {function["end"] + 1 for function in ranges})
+        by_start = sorted(range(len(ranges)), key=lambda i: ranges[i]["start"])
+        heap = []
+        winners = []
+        pending = 0
+        for boundary in boundaries:
+            while pending < len(by_start) and ranges[by_start[pending]]["start"] <= boundary:
+                i = by_start[pending]
+                heapq.heappush(heap, (ranges[i]["end"] - ranges[i]["start"], i))
+                pending += 1
+            while heap and ranges[heap[0][1]]["end"] < boundary:
+                heapq.heappop(heap)
+            winners.append(ranges[heap[0][1]] if heap else None)
+        _fa_cache["state"] = (len(function_ranges), boundaries, winners, bisect_right)
+
     def function_at(position):
-        matches = [
-            function for function in function_ranges
-            if function["start"] <= position <= function["end"]
-        ]
-        if not matches:
-            return None
-        return min(
-            matches,
-            key=lambda function: function["end"] - function["start"]
-        )
+        state = _fa_cache.get("state")
+        if state is None or state[0] != len(function_ranges):
+            _fa_build()
+            state = _fa_cache["state"]
+        if not isinstance(position, int):
+            matches = [function for function in function_ranges if function["start"] <= position <= function["end"]]
+            return min(matches, key=lambda function: function["end"] - function["start"]) if matches else None
+        _, boundaries, winners, bisect_right = state
+        slot = bisect_right(boundaries, position) - 1
+        return winners[slot] if slot >= 0 else None
 
     dependencies_by_function = {}
 
@@ -2288,6 +2310,7 @@ log("="*80)
 
 def write_table(data, name):
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    _iiq_registry[name] = ("c1", data, len(data) if data else 0)
     
     if not data:
         log(f"No data for {name}, skipping (already cleared at startup)\n")
@@ -2303,24 +2326,32 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
+_iiq_write_table_c1 = write_table
 # Write all tables
-write_table(workspaces_info, "Workspaces")
-write_table(fabric_items_info, "FabricItems")
-write_table(datasets_info, "Datasets")
-write_table(dataset_sources_info, "DatasetSourcesInfo")
-write_table(dataset_refresh_history, "DatasetRefreshHistory")
-write_table(dataset_refresh_schedule, "DatasetRefreshSchedule")
-write_table(dataflows_info, "Dataflows")
-write_table(dataflow_lineage, "DataflowLineage")
-write_table(dataflow_sources_info, "DataflowSourcesInfo")
-write_table(dataflow_refresh_history, "DataflowRefreshHistory")
-write_table(reports_info, "Reports")
-write_table(report_pages_info, "ReportPages")
-write_table(apps_info, "Apps")
-write_table(reports_in_app_info, "AppReports")
-write_table(fabric_apps_info, "FabricApps")
-write_table(fabric_app_models_info, "FabricAppModels")
-write_table(fabric_app_queries_info, "FabricAppQueries")
+from concurrent.futures import ThreadPoolExecutor as _IIQ_WPool
+_iiq_write_jobs = [
+    (workspaces_info, "Workspaces"),
+    (fabric_items_info, "FabricItems"),
+    (datasets_info, "Datasets"),
+    (dataset_sources_info, "DatasetSourcesInfo"),
+    (dataset_refresh_history, "DatasetRefreshHistory"),
+    (dataset_refresh_schedule, "DatasetRefreshSchedule"),
+    (dataflows_info, "Dataflows"),
+    (dataflow_lineage, "DataflowLineage"),
+    (dataflow_sources_info, "DataflowSourcesInfo"),
+    (dataflow_refresh_history, "DataflowRefreshHistory"),
+    (reports_info, "Reports"),
+    (report_pages_info, "ReportPages"),
+    (apps_info, "Apps"),
+    (reports_in_app_info, "AppReports"),
+    (fabric_apps_info, "FabricApps"),
+    (fabric_app_models_info, "FabricAppModels"),
+    (fabric_app_queries_info, "FabricAppQueries"),
+]
+with _IIQ_WPool(max_workers=MAX_PARALLEL_WORKERS) as _iiq_wex:
+    _iiq_wfut = [_iiq_wex.submit(write_table, _d, _n) for _d, _n in _iiq_write_jobs]
+    for _f in _iiq_wfut:
+        _f.result()
 
 # ==============================================================  
 # END
@@ -2351,6 +2382,107 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
 from sempy_labs.tom import TOMWrapper
 from sempy_labs._model_dependencies import get_model_calc_dependencies
+
+# Same algorithm and result as sempy_labs._model_dependencies.get_model_calc_dependencies (semantic-link-labs 0.17.1),
+# using dictionary lookups and one concat instead of per-row DataFrame filtering and per-row concatenation.
+# Falls back to the library function for any other installed version.
+import pandas as _iiq_pd
+from importlib.metadata import version as _iiq_version
+from sempy_labs._helper_functions import format_dax_object_name as _iiq_fdon
+
+_iiq_orig_gmcd = get_model_calc_dependencies
+
+_IIQ_DEP_QUERY = """
+        SELECT
+            [TABLE] AS [Table Name],
+            [OBJECT] AS [Object Name],
+            [OBJECT_TYPE] AS [Object Type],
+            [EXPRESSION] AS [Expression],
+            [REFERENCED_TABLE] AS [Referenced Table],
+            [REFERENCED_OBJECT] AS [Referenced Object],
+            [REFERENCED_OBJECT_TYPE] AS [Referenced Object Type]
+        FROM $SYSTEM.DISCOVER_CALC_DEPENDENCY
+        """
+
+
+def _iiq_expand_dependencies(dep):
+    df = dep.copy()
+    objs = {"Measure", "Calc Column", "Calculation Item", "Calc Table"}
+    ot = df["Object Type"].tolist()
+    rot = df["Referenced Object Type"].tolist()
+    tn = df["Table Name"].tolist()
+    on = df["Object Name"].tolist()
+    ex = df["Expression"].tolist()
+    rt = df["Referenced Table"].tolist()
+    ro = df["Referenced Object"].tolist()
+    fon = df["Full Object Name"].tolist()
+    rfn = df["Referenced Full Object Name"].tolist()
+    size = len(df)
+
+    visited = set(zip(fon, rfn, ot, rot))
+    by_object = {}
+    for i in range(size):
+        # a missing value never equals anything in the original boolean filters, so such rows are never matched
+        if not (_iiq_pd.isna(fon[i]) or _iiq_pd.isna(ot[i])):
+            by_object.setdefault((fon[i], ot[i]), []).append(i)
+
+    pending = [
+        (tn[i], on[i], ot[i], ex[i], ro[i], fon[i], rfn[i], rot[i])
+        for i in range(size) if rot[i] in objs
+    ]
+
+    new_rows = []
+    while pending:
+        following = []
+        for (r_tn, r_on, r_ot, r_ex, r_ro, r_fon, r_rfn, r_rot) in pending:
+            if _iiq_pd.isna(r_rfn) or _iiq_pd.isna(r_rot):
+                continue
+            batch = []
+            for j in by_object.get((r_rfn, r_rot), ()):
+                pair = (r_fon, rfn[j], r_ot, rot[j])
+                if pair in visited:
+                    continue
+                visited.add(pair)
+                batch.append([r_tn, r_on, r_ot, r_ex, rt[j], ro[j], rot[j], r_fon, rfn[j], r_ro])
+                if rot[j] in objs:
+                    following.append((r_tn, r_on, r_ot, r_ex, ro[j], r_fon, rfn[j], rot[j]))
+            if batch:
+                # The original builds a DataFrame per processed row and drops any column that is entirely
+                # missing in it, so such columns come back as float NaN after the concat.
+                for column in range(10):
+                    if all(_iiq_pd.isna(row[column]) for row in batch):
+                        for row in batch:
+                            row[column] = float("nan")
+                new_rows.extend(batch)
+        pending = following
+
+    if new_rows:
+        new_df = _iiq_pd.DataFrame(new_rows, columns=[
+            "Table Name", "Object Name", "Object Type", "Expression", "Referenced Table", "Referenced Object",
+            "Referenced Object Type", "Full Object Name", "Referenced Full Object Name", "Parent Node",
+        ])
+        df = _iiq_pd.concat([df, new_df], ignore_index=True)
+    return df
+
+
+def _iiq_gmcd(dataset, workspace=None):
+    try:
+        same_version = _iiq_version("semantic-link-labs") == "0.17.1"
+    except Exception:
+        same_version = False
+    if not same_version:
+        return _iiq_orig_gmcd(dataset=dataset, workspace=workspace)
+    dep = fabric.evaluate_dax(dataset=dataset, workspace=workspace, dax_string=_IIQ_DEP_QUERY)
+    dep["Object Type"] = dep["Object Type"].str.replace("_", " ").str.title()
+    dep["Referenced Object Type"] = dep["Referenced Object Type"].str.replace("_", " ").str.title()
+    dep["Full Object Name"] = _iiq_fdon(dep["Table Name"], dep["Object Name"])
+    dep["Referenced Full Object Name"] = _iiq_fdon(dep["Referenced Table"], dep["Referenced Object"])
+    dep["Parent Node"] = dep["Object Name"]
+    return _iiq_expand_dependencies(dep)
+
+
+get_model_calc_dependencies = _iiq_gmcd
+
 
 # Uses shared configuration from Cell 0: LAKEHOUSE_SCHEMA, WORKSPACE_NAMES, SCAN_ALL_WORKSPACES, MAX_PARALLEL_WORKERS
 
@@ -2515,6 +2647,64 @@ log("")
 # ==============================================================  
 # MODEL METADATA EXTRACTION (PARALLELIZED)
 # ==============================================================
+
+
+def _iiq_build_dep_index(tom, dependencies):
+    # Same lookups TOMWrapper.depends_on repeats for every object, computed once per model.
+    from sempy_labs._helper_functions import format_dax_object_name as _iiq_fdon
+    rows = {}
+    names = ("Object Type", "Table Name", "Object Name", "Referenced Object Type",
+             "Referenced Object", "Referenced Full Object Name", "Referenced Table")
+    for ot, tn, on, rt, ro, rfn, rtb in zip(*[dependencies[c].tolist() for c in names]):
+        e = rows.get((ot, tn, on))
+        if e is None:
+            e = rows[(ot, tn, on)] = ([], [], [])
+        if rt == "Measure":
+            e[0].append(ro)
+        if rt in ("Column", "Calc Column"):
+            e[1].append(rfn)
+        if rt in ("Table", "Calc Table"):
+            e[2].append(rtb)
+    meas_pos, col_pos, tbl_pos = {}, {}, {}
+    for i, m in enumerate(tom.all_measures()):
+        meas_pos.setdefault(m.Name, []).append((i, m))
+    for i, c in enumerate(tom.all_columns()):
+        col_pos.setdefault(_iiq_fdon(c.Parent.Name, c.Name), []).append((i, c))
+    for i, t in enumerate(tom.model.Tables):
+        tbl_pos.setdefault(t.Name, []).append((i, t))
+    return rows, meas_pos, col_pos, tbl_pos
+
+def _iiq_depends_on(index, obj):
+    import Microsoft.AnalysisServices.Tabular as _IIQ_TOM
+    rows, meas_pos, col_pos, tbl_pos = index
+    ot = obj.ObjectType
+    name = obj.Name
+    if ot == _IIQ_TOM.ObjectType.CalculationItem:
+        parent = obj.Parent.Table.Name
+    else:
+        parent = obj.Parent.Name
+    if ot == _IIQ_TOM.ObjectType.Table:
+        parent = name
+        types = ["Table", "Calc Table"]
+    elif ot == _IIQ_TOM.ObjectType.Column:
+        types = ["Column", "Calc Column"]
+    elif ot == _IIQ_TOM.ObjectType.CalculationItem:
+        types = ["Calculation Item"]
+    else:
+        types = [str(ot)]
+    meas, cols, tbls = set(), set(), set()
+    for t in types:
+        e = rows.get((t, parent, name))
+        if e:
+            meas.update(e[0]); cols.update(e[1]); tbls.update(e[2])
+    out = []
+    for names, pos in ((meas, meas_pos), (cols, col_pos), (tbls, tbl_pos)):
+        hit = []
+        for n in names:
+            hit.extend(pos.get(n, ()))
+        hit.sort(key=lambda p: p[0])
+        out.extend(o for _, o in hit)
+    return out
 
 def extract_single_model(ws_name, model_name, model_id, report_date):
     """Extract all metadata for a single model. Returns (details, dependencies, error_msg).
@@ -2806,10 +2996,11 @@ def extract_single_model(ws_name, model_name, model_id, report_date):
                 
                 if dependencies_df is not None and not dependencies_df.empty:
                     dep_count = 0
+                    _dep_index = _iiq_build_dep_index(tom, dependencies_df)
                     
                     for m in measures:
                         try:
-                            for dep_obj in tom.depends_on(object=m, dependencies=dependencies_df):
+                            for dep_obj in _iiq_depends_on(_dep_index, m):
                                 dependencies.append({
                                     "ObjectName": m.Name, "ObjectType": "Measure",
                                     "DependsOn": get_dependency_name(dep_obj),
@@ -2824,7 +3015,7 @@ def extract_single_model(ws_name, model_name, model_id, report_date):
 
                     for col in calc_columns:
                         try:
-                            for dep_obj in tom.depends_on(object=col, dependencies=dependencies_df):
+                            for dep_obj in _iiq_depends_on(_dep_index, col):
                                 dependencies.append({
                                     "ObjectName": col.Name, "ObjectType": "CalculatedColumn",
                                     "DependsOn": get_dependency_name(dep_obj),
@@ -2839,7 +3030,7 @@ def extract_single_model(ws_name, model_name, model_id, report_date):
 
                     for ci in calc_items:
                         try:
-                            for dep_obj in tom.depends_on(object=ci, dependencies=dependencies_df):
+                            for dep_obj in _iiq_depends_on(_dep_index, ci):
                                 dependencies.append({
                                     "ObjectName": ci.Name, "ObjectType": "CalculationItem",
                                     "DependsOn": get_dependency_name(dep_obj),
@@ -2942,6 +3133,7 @@ def write_table(data, name):
         name: Name of the table
     """
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    _iiq_registry[name] = ("tpl", data, max(len(data) - 1, 0))
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -2964,8 +3156,15 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-write_table(all_model_details, "ModelDetail")
-write_table(all_model_dependencies, "ModelDependencies")
+from concurrent.futures import ThreadPoolExecutor as _IIQ_WPool
+_iiq_write_jobs = [
+    (all_model_details, "ModelDetail"),
+    (all_model_dependencies, "ModelDependencies"),
+]
+with _IIQ_WPool(max_workers=MAX_PARALLEL_WORKERS) as _iiq_wex:
+    _iiq_wfut = [_iiq_wex.submit(write_table, _d, _n) for _d, _n in _iiq_write_jobs]
+    for _f in _iiq_wfut:
+        _f.result()
 
 # ==============================================================  
 # END
@@ -2995,6 +3194,133 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import sempy.fabric as fabric
 from sempy.fabric import FabricRestClient
 from sempy_labs.report import ReportWrapper
+
+# Cache parsed JSONPath expressions (same results, parser built once per distinct expression)
+import sys as _iiq_sys
+from jsonpath_ng import ext as _iiq_jpext
+_iiq_orig_parse = _iiq_jpext.parse
+_iiq_parse_cache = {}
+def _iiq_cached_parse(path, *a, **k):
+    if a or k:
+        return _iiq_orig_parse(path, *a, **k)
+    r = _iiq_parse_cache.get(path)
+    if r is None:
+        r = _iiq_fast.get(path) or _iiq_orig_parse(path)
+        _iiq_parse_cache[path] = r
+    return r
+
+# Plain recursive walks for the two generic JSONPath descendant searches that ReportWrapper.list_visuals runs for every visual
+# ("$..*" in contains_key and "$..showAll" in find_show_all_with_jsonpath). Same matched values in the same order; only .value is used by the
+# library for these two expressions. Guarded: a self-check against the installed jsonpath-ng must pass before the fast path is enabled.
+import collections as _iiq_coll
+import random as _iiq_random
+
+_IIQ_Match = _iiq_coll.namedtuple("_IIQ_Match", ["value"])
+
+
+class _IIQFastAllDescendants:
+    """Same values as jsonpath_ng.ext.parse("$..*").find(data). jsonpath-ng up to 1.10 returns the value of every dict entry at any depth;
+    1.11 also returns every array element (include_list_items=True). Parents come before children, children in order."""
+
+    def __init__(self, include_list_items=False):
+        self.include_list_items = include_list_items
+
+    def find(self, data):
+        out = []
+        li = self.include_list_items
+
+        def walk(node):
+            if isinstance(node, dict):
+                kids = list(node.values())
+            elif isinstance(node, list):
+                if not li:
+                    for v in node:
+                        walk(v)
+                    return
+                kids = node
+            else:
+                return
+            out.extend(_IIQ_Match(v) for v in kids)
+            for v in kids:
+                walk(v)
+
+        walk(data)
+        return out
+
+
+class _IIQFastKeyDescendants:
+    """Same values as jsonpath_ng.ext.parse("$..<key>").find(data): the value of every dict entry named <key> at any depth."""
+
+    def __init__(self, key):
+        self.key = key
+
+    def find(self, data):
+        out = []
+        key = self.key
+
+        def walk(node):
+            if isinstance(node, dict):
+                if key in node:
+                    out.append(_IIQ_Match(node[key]))
+                for v in list(node.values()):
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(data)
+        return out
+
+
+def _iiq_make_fast(orig_parse=None):
+    """Fast walks matching the installed jsonpath-ng. The array-element behaviour of "$..*" is probed once: {"a": [0]} gives 1 match
+    in jsonpath-ng <= 1.10 and 2 matches in 1.11."""
+    li = False
+    if orig_parse is not None:
+        try:
+            li = len(orig_parse("$..*").find({"a": [0]})) == 2
+        except Exception:
+            li = False
+    return {"$..*": _IIQFastAllDescendants(li), "$..showAll": _IIQFastKeyDescendants("showAll")}
+
+
+def _iiq_selfcheck(orig_parse, docs=400, seed=20261017):
+    """True only if the fast walks return exactly the same values (same objects, same order) as the installed jsonpath-ng on random documents."""
+    rnd = _iiq_random.Random(seed)
+    keys = ["showAll", "a", "b", "visual", "objects", "properties", "x"]
+
+    def make(depth=0):
+        r = rnd.random()
+        if depth > 5 or r < 0.3:
+            return rnd.choice([None, True, False, "s", 0, 1, 2.5, [], {}, "showAll"])
+        if r < 0.7:
+            return {k: make(depth + 1) for k in rnd.sample(keys, rnd.randint(0, 5))}
+        return [make(depth + 1) for _ in range(rnd.randint(0, 4))]
+
+    fast = _iiq_make_fast(orig_parse)
+    try:
+        for _ in range(docs):
+            d = make()
+            for expr, fobj in fast.items():
+                a = [m.value for m in orig_parse(expr).find(d)]
+                b = [m.value for m in fobj.find(d)]
+                if len(a) != len(b) or any(x is not y for x, y in zip(a, b)):
+                    return False
+        return True
+    except Exception:
+        return False
+
+_iiq_fast = _iiq_make_fast(_iiq_orig_parse) if _iiq_selfcheck(_iiq_orig_parse) else {}
+_iiq_fast_enabled = bool(_iiq_fast)
+print('Fast JSONPath descendant searches enabled:', _iiq_fast_enabled, flush=True)
+_iiq_patched_modules = []
+for _iiq_m in list(_iiq_sys.modules.values()):
+    try:
+        if getattr(_iiq_m, "__name__", "").startswith("sempy_labs") and vars(_iiq_m).get("parse") is _iiq_orig_parse:
+            _iiq_m.parse = _iiq_cached_parse
+            _iiq_patched_modules.append(_iiq_m.__name__)
+    except Exception:
+        pass
 # Note: Using private module for resolve_dataset_from_report - consider this dependency if upgrading semantic-link-labs
 from sempy_labs._helper_functions import resolve_dataset_from_report
 
@@ -3522,8 +3848,10 @@ def _get_report_definition_parts(ws_id, rpt_id):
                 retry = int(resp.headers.get("Retry-After", "3") or "3")
             except Exception:
                 retry = 3
-            for _ in range(120):  # cap polling iterations
-                time.sleep(max(1, retry))
+            _iiq_deadline = time.time() + 120 * max(1, retry)  # same overall ceiling as 120 polls at the server's Retry-After
+            _iiq_poll = 1
+            while True:
+                time.sleep(_iiq_poll)
                 op = client.get(op_rel)
                 st = (op.json() or {}).get("status")
                 if st == "Succeeded":
@@ -3534,6 +3862,9 @@ def _get_report_definition_parts(ws_id, rpt_id):
                     retry = int(op.headers.get("Retry-After", str(retry)) or retry)
                 except Exception:
                     pass
+                if time.time() >= _iiq_deadline:
+                    break
+                _iiq_poll = min(max(1, retry), _iiq_poll + 1)
             res = client.get(op_rel.rstrip("/") + "/result")
             body = res.json()
         else:
@@ -4022,6 +4353,7 @@ else:
                 continue
 
             log(f"  Reports found: {len(reports_df)}")
+            _iiq_ds_pos = list(reports_df.columns).index("Dataset Id") if "Dataset Id" in reports_df.columns else None
             
             for rpt_row in reports_df.itertuples(index=False):
                 rpt_name = rpt_row.Name
@@ -4030,6 +4362,8 @@ else:
                 model_id = ""
                 if hasattr(rpt_row, 'DatasetId') and rpt_row.DatasetId is not None:
                     model_id = str(rpt_row.DatasetId)
+                elif _iiq_ds_pos is not None and pd.notna(rpt_row[_iiq_ds_pos]) and str(rpt_row[_iiq_ds_pos]).strip():
+                    model_id = str(rpt_row[_iiq_ds_pos])
                 
                 if not model_id:
                     try:
@@ -4108,6 +4442,7 @@ def write_table(data, name):
         name: Name of the table
     """
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    _iiq_registry[name] = ("tpl", data, max(len(data) - 1, 0))
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -4130,17 +4465,24 @@ def write_table(data, name):
 
     log(f"✓ Wrote table: {full_name}\n")
 
-write_table(all_connections, "Connections")
-write_table(all_pages, "Pages")
-write_table(all_visuals, "Visuals")
-write_table(all_bookmarks, "Bookmarks")
-write_table(all_custom_visuals, "CustomVisuals")
-write_table(all_report_filters, "ReportFilters")
-write_table(all_page_filters, "PageFilters")
-write_table(all_visual_filters, "VisualFilters")
-write_table(all_visual_objects, "VisualObjects")
-write_table(all_report_level_measures, "ReportLevelMeasures")
-write_table(all_visual_interactions, "VisualInteractions")
+from concurrent.futures import ThreadPoolExecutor as _IIQ_WPool
+_iiq_write_jobs = [
+    (all_connections, "Connections"),
+    (all_pages, "Pages"),
+    (all_visuals, "Visuals"),
+    (all_bookmarks, "Bookmarks"),
+    (all_custom_visuals, "CustomVisuals"),
+    (all_report_filters, "ReportFilters"),
+    (all_page_filters, "PageFilters"),
+    (all_visual_filters, "VisualFilters"),
+    (all_visual_objects, "VisualObjects"),
+    (all_report_level_measures, "ReportLevelMeasures"),
+    (all_visual_interactions, "VisualInteractions"),
+]
+with _IIQ_WPool(max_workers=MAX_PARALLEL_WORKERS) as _iiq_wex:
+    _iiq_wfut = [_iiq_wex.submit(write_table, _d, _n) for _d, _n in _iiq_write_jobs]
+    for _f in _iiq_wfut:
+        _f.result()
 
 # ==============================================================  
 # END
@@ -4544,6 +4886,7 @@ def write_table(data, name):
         name: Name of the table
     """
     full_name = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    _iiq_registry[name] = ("tpl", data, max(len(data) - 1, 0))
     
     # Check if we only have the template row (length 1 means just the schema template)
     if len(data) == 1:
@@ -4597,87 +4940,146 @@ log("="*80)
 # 4. Refresh the SQL endpoint metadata
 # ================================
 
-log("\n" + "="*80)
-log("SQL ENDPOINT METADATA REFRESH")
-log(f"Started: {datetime.now()}")
-log("="*80)
+# [VERIFY] post-write table check: every output table must hold exactly the rows this run handed to its writer.
+# The start-up step creates all tables empty, so existence alone cannot tell a lost overwrite from a good write; the row count can.
+# A missing or mismatched table is rewritten from the in-memory data and re-checked; a second failure raises.
+def _iiq_create_empty(name):
+    full = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+    empty_df = spark.createDataFrame(pd.DataFrame([ALL_TABLE_SCHEMAS[name]])).filter("1=0")
+    empty_df.write.mode("overwrite").option("overwriteSchema", "true").format("delta").saveAsTable(full)
 
-try:
-    log("\nGetting workspace context...")
-    
-    workspace_id = None
-    lakehouse_name = None
-    
-    # Try to get workspace ID from spark configuration
+
+def _iiq_verify_tables(stage):
+    from concurrent.futures import ThreadPoolExecutor as _IIQ_TPE
+
+    # One cheap catalog listing answers "does it exist" for tables expected to be empty; tables expected to hold rows are counted.
     try:
-        workspace_id = spark.conf.get("trident.workspace.id")
-        log(f"  Workspace ID: {workspace_id}")
-    except Exception as e:
-        log(f"  Could not get workspace ID from spark config: {e}")
-    
-    # Get the lakehouse name
-    try:
-        lakehouse_name = spark.conf.get("trident.lakehouse.name")
-        log(f"  Lakehouse name: {lakehouse_name}")
-    except Exception as e:
-        log(f"  Could not get lakehouse name from spark config: {e}")
-    
-    # If we don't have workspace ID or lakehouse name, we can't proceed
-    if not workspace_id:
-        log("\n  ERROR: Unable to get workspace ID from notebook context")
-        log("  This feature requires running in a Fabric notebook environment.")
-        log("\nERROR during SQL endpoint refresh: Unable to get workspace ID")
-        log("This is not critical - tables are still written to lakehouse.")
-        log("You may need to manually refresh the SQL endpoint if needed.")
-    elif not lakehouse_name:
-        log("\n  ERROR: Unable to get lakehouse name from notebook context")
-        log("\nERROR during SQL endpoint refresh: Unable to get lakehouse name")
-        log("This is not critical - tables are still written to lakehouse.")
-        log("You may need to manually refresh the SQL endpoint if needed.")
-    else:
-        # Use FabricRestClient to refresh SQL endpoint
-        log(f"\nRefreshing SQL endpoint metadata for lakehouse: {lakehouse_name}")
-        
-        client = FabricRestClient()
-        
-        # List SQL endpoints in the workspace
-        sql_endpoints_url = f"v1/workspaces/{workspace_id}/sqlEndpoints"
-        response = client.get(sql_endpoints_url)
-        
-        if response.status_code == 200:
-            sql_endpoints = response.json().get('value', [])
-            log(f"  Found {len(sql_endpoints)} SQL endpoint(s) in workspace")
-            
-            # Refresh all SQL endpoints in the workspace
-            if sql_endpoints:
-                log(f"  Refreshing {len(sql_endpoints)} SQL endpoint(s)...")
-                
-                for endpoint in sql_endpoints:
-                    endpoint_name = endpoint.get('displayName', '')
-                    endpoint_id = endpoint.get('id', '')
-                    
-                    # Refresh the SQL endpoint metadata
-                    # The API expects a JSON body but all parameters are optional, so we pass an empty object
-                    refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
-                    refresh_response = client.post(refresh_url, json={})
-                    
-                    if refresh_response.status_code in [200, 202]:
-                        log(f"  ✓ Refreshed SQL endpoint: {endpoint_name}")
-                    else:
-                        log(f"  Warning: SQL endpoint '{endpoint_name}' refresh returned status {refresh_response.status_code}")
-                        log(f"  Response: {refresh_response.text}")
-            else:
-                log(f"  Warning: No SQL endpoints found in workspace")
+        listed = {r["tableName"].lower() for r in spark.sql(f"SHOW TABLES IN {CATALOG}.{LAKEHOUSE_SCHEMA}").collect()}
+    except Exception:
+        listed = None
+
+    def _check(name):
+        full = f"{CATALOG}.{LAKEHOUSE_SCHEMA}.{name}"
+        entry = _iiq_registry.get(name)
+        want = entry[2] if entry else 0
+        if want == 0 and listed is not None and name.lower() in listed:
+            return name, None
+        try:
+            rows = spark.sql(f"SELECT COUNT(*) FROM {full}").first()[0]
+        except Exception as ex:
+            return name, f"missing or unreadable ({type(ex).__name__})"
+        if rows != want:
+            return name, f"{rows} rows, expected {want}"
+        return name, None
+
+    names = sorted(set(ALL_TABLE_SCHEMAS) | set(_iiq_registry))
+    with _IIQ_TPE(max_workers=MAX_PARALLEL_WORKERS) as ex:
+        problems = [p for p in ex.map(_check, names) if p[1]]
+    log(f"[VERIFY] {stage}: {len(names) - len(problems)} of {len(names)} tables hold this run's data")
+    if not problems:
+        return []
+    rewritten = []
+    for name, why in problems:
+        log(f"  WARNING: table {name}: {why}; rewriting from this run's data")
+        entry = _iiq_registry.get(name)
+        if entry is None or (entry[0] == "c1" and not entry[1]):
+            _iiq_create_empty(name)
+        elif entry[0] == "c1":
+            _iiq_write_table_c1(entry[1], name)
         else:
-            log(f"  Warning: Could not list SQL endpoints (status {response.status_code})")
-            log(f"  Response: {response.text}")
-        
-        log("\n✓ SQL endpoint metadata refresh completed")
+            write_table(entry[1], name)
+        rewritten.append(name)
+    still = [p for p in (_check(n) for n in rewritten) if p[1]]
+    if still:
+        raise RuntimeError(f"[VERIFY] tables still wrong after rewrite: {still}")
+    log(f"[VERIFY] {stage}: rewrote and re-verified {len(rewritten)} table(s): {rewritten}")
+    return rewritten
 
-except Exception as e:
-    log(f"\nERROR during SQL endpoint refresh: {e}")
-    log("This is not critical - tables are still written to lakehouse.")
-    log("You may need to manually refresh the SQL endpoint if needed.")
+_iiq_verify_tables("before SQL endpoint refresh")
+for _iiq_pass in range(2):
+    log("\n" + "="*80)
+    log("SQL ENDPOINT METADATA REFRESH")
+    log(f"Started: {datetime.now()}")
+    log("="*80)
+
+    try:
+        log("\nGetting workspace context...")
+    
+        workspace_id = None
+        lakehouse_name = None
+    
+        # Try to get workspace ID from spark configuration
+        try:
+            workspace_id = spark.conf.get("trident.workspace.id")
+            log(f"  Workspace ID: {workspace_id}")
+        except Exception as e:
+            log(f"  Could not get workspace ID from spark config: {e}")
+    
+        # Get the lakehouse name
+        try:
+            lakehouse_name = spark.conf.get("trident.lakehouse.name")
+            log(f"  Lakehouse name: {lakehouse_name}")
+        except Exception as e:
+            log(f"  Could not get lakehouse name from spark config: {e}")
+    
+        # If we don't have workspace ID or lakehouse name, we can't proceed
+        if not workspace_id:
+            log("\n  ERROR: Unable to get workspace ID from notebook context")
+            log("  This feature requires running in a Fabric notebook environment.")
+            log("\nERROR during SQL endpoint refresh: Unable to get workspace ID")
+            log("This is not critical - tables are still written to lakehouse.")
+            log("You may need to manually refresh the SQL endpoint if needed.")
+        elif not lakehouse_name:
+            log("\n  ERROR: Unable to get lakehouse name from notebook context")
+            log("\nERROR during SQL endpoint refresh: Unable to get lakehouse name")
+            log("This is not critical - tables are still written to lakehouse.")
+            log("You may need to manually refresh the SQL endpoint if needed.")
+        else:
+            # Use FabricRestClient to refresh SQL endpoint
+            log(f"\nRefreshing SQL endpoint metadata for lakehouse: {lakehouse_name}")
+        
+            client = FabricRestClient()
+        
+            # List SQL endpoints in the workspace
+            sql_endpoints_url = f"v1/workspaces/{workspace_id}/sqlEndpoints"
+            response = client.get(sql_endpoints_url)
+        
+            if response.status_code == 200:
+                sql_endpoints = response.json().get('value', [])
+                log(f"  Found {len(sql_endpoints)} SQL endpoint(s) in workspace")
+            
+                # Refresh all SQL endpoints in the workspace
+                if sql_endpoints:
+                    log(f"  Refreshing {len(sql_endpoints)} SQL endpoint(s)...")
+                
+                    for endpoint in sql_endpoints:
+                        endpoint_name = endpoint.get('displayName', '')
+                        endpoint_id = endpoint.get('id', '')
+                    
+                        # Refresh the SQL endpoint metadata
+                        # The API expects a JSON body but all parameters are optional, so we pass an empty object
+                        refresh_url = f"v1/workspaces/{workspace_id}/sqlEndpoints/{endpoint_id}/refreshMetadata"
+                        refresh_response = client.post(refresh_url, json={})
+                    
+                        if refresh_response.status_code in [200, 202]:
+                            log(f"  ✓ Refreshed SQL endpoint: {endpoint_name}")
+                        else:
+                            log(f"  Warning: SQL endpoint '{endpoint_name}' refresh returned status {refresh_response.status_code}")
+                            log(f"  Response: {refresh_response.text}")
+                else:
+                    log(f"  Warning: No SQL endpoints found in workspace")
+            else:
+                log(f"  Warning: Could not list SQL endpoints (status {response.status_code})")
+                log(f"  Response: {response.text}")
+        
+            log("\n✓ SQL endpoint metadata refresh completed")
+
+    except Exception as e:
+        log(f"\nERROR during SQL endpoint refresh: {e}")
+        log("This is not critical - tables are still written to lakehouse.")
+        log("You may need to manually refresh the SQL endpoint if needed.")
+    if not _iiq_verify_tables("after SQL endpoint refresh"):
+        break
 
 log("\n" + "="*80)
 log("ALL PROCESSES COMPLETE")
